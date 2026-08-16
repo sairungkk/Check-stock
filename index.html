@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Navera Inventory Scanner & Mapper</title>
+    <title>Navera Ultimate Inventory Suite</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
@@ -15,72 +15,121 @@
 <body class="p-4">
 
     <div class="max-w-md mx-auto">
-        <h1 class="text-xl font-bold text-amber-900 mb-4 text-center">Navera Inventory Scanner</h1>
+        <h1 class="text-xl font-bold text-amber-900 mb-4 text-center">Navera Inventory Suite</h1>
         
-        <!-- Import PO -->
-        <div class="card p-4 mb-4 border-l-4 border-amber-600">
-            <label class="block text-sm font-bold mb-2">1. Import PO (.xlsx)</label>
-            <input type="file" id="inputExcel" class="w-full text-sm">
-            <p id="poStatus" class="text-xs text-stone-500 mt-1">ยังไม่ได้โหลดไฟล์ PO</p>
+        <!-- Tab Switcher -->
+        <div class="flex bg-stone-200 p-1 rounded-xl mb-4 text-xs font-bold">
+            <button onclick="switchTab('po')" id="tabPoBtn" class="flex-1 py-2 rounded-lg bg-white text-amber-900 shadow">📁 นับจาก PO / สแกน</button>
+            <button onclick="switchTab('manual')" id="tabManualBtn" class="flex-1 py-2 rounded-lg text-stone-600">✍️ คีย์เองอิสระ</button>
         </div>
 
-        <!-- Scanner Section -->
-        <div class="card p-4 mb-4">
-            <div id="reader" class="w-full h-48 bg-black rounded overflow-hidden"></div>
-            <div class="flex gap-2 mt-3">
-                <button onclick="startScanner()" class="flex-1 bg-amber-700 text-white py-2 rounded font-bold">📷 เปิดกล้องสแกน</button>
-                <button onclick="stopScanner()" class="flex-1 bg-stone-600 text-white py-2 rounded font-bold">⏹️ ปิดกล้อง</button>
+        <!-- ================= MODE 1: PO & SCANNER ================= -->
+        <div id="sectionPo" class="space-y-4">
+            <!-- Import PO -->
+            <div class="card p-4 border-l-4 border-amber-600">
+                <label class="block text-sm font-bold mb-2">1. Import PO (.xlsx)</label>
+                <input type="file" id="inputExcel" class="w-full text-sm">
+                <p id="poStatus" class="text-xs text-stone-500 mt-1">ยังไม่ได้โหลดไฟล์ PO (หรือข้ามไปใช้โหมดคีย์เองได้)</p>
+            </div>
+
+            <!-- Scanner Section -->
+            <div class="card p-4">
+                <div id="reader" class="w-full h-48 bg-black rounded overflow-hidden"></div>
+                <div class="flex gap-2 mt-3">
+                    <button onclick="startScanner()" class="flex-1 bg-amber-700 text-white py-2 rounded font-bold text-sm">📷 เปิดกล้องสแกน</button>
+                    <button onclick="stopScanner()" class="flex-1 bg-stone-600 text-white py-2 rounded font-bold text-sm">⏹️ ปิดกล้อง</button>
+                </div>
+            </div>
+
+            <!-- Manual Search PO Section -->
+            <div class="card p-4 border-2 border-stone-300">
+                <h3 class="text-xs font-bold text-stone-700 mb-1">🔍 ค้นหา/พิมพ์ชื่อสินค้าใน PO (ไม่ต้องสแกน)</h3>
+                <div class="flex gap-2">
+                    <input type="text" id="manualSearchInput" class="flex-1 border rounded p-2 text-sm" placeholder="พิมพ์ชื่อหรือรหัสสินค้า...">
+                    <button onclick="searchManualItem()" class="bg-stone-700 text-white px-3 py-2 rounded font-bold text-sm">ค้นหา</button>
+                </div>
+                <div id="manualResultList" class="mt-2 max-h-32 overflow-y-auto space-y-1"></div>
             </div>
         </div>
 
-        <!-- Manual Search Section (Alternative to scanning) -->
-        <div class="card p-4 mb-4 border-2 border-stone-300">
-            <h3 class="text-xs font-bold text-stone-700 mb-1">🔍 ค้นหา/พิมพ์ชื่อสินค้าเอง (กรณีไม่สแกน)</h3>
-            <div class="flex gap-2">
-                <input type="text" id="manualSearchInput" class="flex-1 border rounded p-2 text-sm" placeholder="พิมพ์ชื่อหรือรหัสสินค้า...">
-                <button onclick="searchManualItem()" class="bg-stone-700 text-white px-3 py-2 rounded font-bold text-sm">ค้นหา</button>
+        <!-- ================= MODE 2: FULL MANUAL ENTRY ================= -->
+        <div id="sectionManual" class="space-y-4 hidden">
+            <div class="card p-4 border-l-4 border-amber-600">
+                <h3 class="font-bold text-stone-700 text-sm mb-3">✍️ พิมพ์เพิ่มรหัสและสินค้าเอง</h3>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-bold text-stone-600 mb-1">รหัสสินค้า (Code):</label>
+                        <input type="text" id="customCode" class="w-full border rounded p-2 text-sm" placeholder="เช่น BEER01">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-stone-600 mb-1">ชื่อสินค้า (Description):</label>
+                        <input type="text" id="customDesc" class="w-full border rounded p-2 text-sm" placeholder="เช่น Heineken 330ml">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-stone-600 mb-1">จำนวน (Qty):</label>
+                        <input type="number" id="customQty" class="w-full border rounded p-2 text-sm font-bold text-center text-emerald-700 text-lg" value="1">
+                    </div>
+                    <button onclick="addCustomItem()" class="w-full bg-amber-700 text-white py-2.5 rounded-lg font-bold text-sm">➕ บันทึกเพิ่มรายการ</button>
+                </div>
             </div>
-            <div id="manualResultList" class="mt-2 max-h-32 overflow-y-auto space-y-1"></div>
         </div>
 
-        <!-- Count Panel (When found) -->
-        <div id="countPanel" class="card p-4 mb-4 hidden border-2 border-emerald-500">
-            <h3 class="text-xs text-stone-500">สินค้ารายการนี้:</h3>
-            <h2 id="itemName" class="font-bold text-amber-900 text-lg mb-2"></h2>
-            <p class="text-xs text-stone-600 mb-2">บาร์โค้ด: <span id="currentBarcode" class="font-mono font-bold">-</span></p>
+        <!-- Count Panel (Shared when item is selected/scanned) -->
+        <div id="countPanel" class="card p-4 my-4 hidden border-2 border-emerald-500">
+            <h3 class="text-xs text-stone-500">กำลังนับสินค้ารายการนี้:</h3>
+            <h2 id="itemName" class="font-bold text-amber-900 text-base mb-1"></h2>
+            <p class="text-xs text-stone-600 mb-3">รหัส/บาร์โค้ด: <span id="currentBarcode" class="font-mono font-bold">-</span></p>
             <div class="flex gap-2">
                 <input type="number" id="qtyInput" class="w-24 border rounded p-2 font-bold text-lg text-center" value="1" placeholder="จำนวน">
-                <button onclick="saveCount()" class="flex-1 bg-emerald-600 text-white rounded font-bold py-2">บันทึกยอดนับ</button>
+                <button onclick="saveCount()" class="flex-1 bg-emerald-600 text-white rounded font-bold py-2 text-sm">✅ บันทึกยอดนับ</button>
             </div>
         </div>
 
         <!-- Mapping Panel (When Barcode not found in PO) -->
-        <div id="mapPanel" class="card p-4 mb-4 hidden border-2 border-amber-500">
-            <h3 class="text-sm font-bold text-rose-600 mb-1">❌ ไม่พบบาร์โค้ดนี้ในระบบ</h3>
-            <p class="text-xs text-stone-600 mb-3">บาร์โค้ดใหม่: <span id="newBarcode" class="font-mono font-bold"></span></p>
-            <label class="block text-xs font-bold mb-1 text-stone-700">พิมพ์ค้นหาหรือเลือกสินค้าใน PO เพื่อผูกบาร์โค้ด:</label>
-            <input type="text" id="mapSearchInput" oninput="filterMapDropdown()" class="w-full border rounded p-2 text-sm mb-2" placeholder="พิมพ์ชื่อเพื่อกรองรายการ...">
+        <div id="mapPanel" class="card p-4 my-4 hidden border-2 border-amber-500">
+            <h3 class="text-sm font-bold text-rose-600 mb-1">❌ ไม่พบบาร์โค้ดนี้ใน PO</h3>
+            <p class="text-xs text-stone-600 mb-2">บาร์โค้ดใหม่: <span id="newBarcode" class="font-mono font-bold"></span></p>
+            <label class="block text-xs font-bold mb-1 text-stone-700">เลือกสินค้าใน PO เพื่อผูกบาร์โค้ดนี้:</label>
+            <input type="text" id="mapSearchInput" oninput="filterMapDropdown()" class="w-full border rounded p-2 text-sm mb-2" placeholder="กรองชื่อสินค้า...">
             <select id="poSelectDropdown" class="w-full border rounded p-2 text-sm mb-3 bg-stone-50" size="4"></select>
-            <button onclick="bindAndCount()" class="w-full bg-amber-700 text-white rounded font-bold py-2">🔗 ผูกบาร์โค้ดและไปต่อ</button>
+            <button onclick="bindAndCount()" class="w-full bg-amber-700 text-white rounded font-bold py-2 text-sm">🔗 ผูกบาร์โค้ดและนับ</button>
         </div>
 
         <!-- Summary & Export -->
-        <div class="card p-4">
-            <h3 class="font-bold text-stone-700 text-sm mb-2">📊 สรุปรายการที่นับแล้ว</h3>
-            <div id="summaryList" class="text-xs text-stone-600 max-h-40 overflow-y-auto mb-3 border p-2 rounded bg-stone-50">
+        <div class="card p-4 mt-4">
+            <h3 class="font-bold text-stone-700 text-sm mb-2">📊 สรุปรายการที่นับแล้ว (<span id="totalCountedItems">0</span> รายการ)</h3>
+            <div id="summaryList" class="text-xs text-stone-600 max-h-48 overflow-y-auto mb-3 border p-2 rounded bg-stone-50 space-y-1">
                 ยังไม่มีการบันทึกข้อมูล
             </div>
-            <button onclick="exportExcel()" class="w-full bg-blue-700 text-white py-3 rounded-lg font-bold">📥 Export เป็นไฟล์ Excel</button>
+            <button onclick="exportExcel()" class="w-full bg-blue-700 text-white py-3 rounded-lg font-bold text-sm">📥 Export เป็นไฟล์ Excel</button>
         </div>
     </div>
 
     <script>
         let poData = [];
-        let countedData = {}; 
+        let countedData = {}; // index or unique key -> qty
+        let customItems = []; // For items added completely manually
         let barcodeMap = {};  
         let currentItem = null;
         let scannedTempBarcode = "";
         let html5QrCode;
+        let currentMode = 'po'; // 'po' or 'manual'
+
+        function switchTab(mode) {
+            currentMode = mode;
+            if (mode === 'po') {
+                document.getElementById('sectionPo').classList.remove('hidden');
+                document.getElementById('sectionManual').classList.add('hidden');
+                document.getElementById('tabPoBtn').className = "flex-1 py-2 rounded-lg bg-white text-amber-900 shadow";
+                document.getElementById('tabManualBtn').className = "flex-1 py-2 rounded-lg text-stone-600";
+            } else {
+                document.getElementById('sectionPo').classList.add('hidden');
+                document.getElementById('sectionManual').classList.remove('hidden');
+                document.getElementById('tabPoBtn').className = "flex-1 py-2 rounded-lg text-stone-600";
+                document.getElementById('tabManualBtn').className = "flex-1 py-2 rounded-lg bg-white text-amber-900 shadow";
+                stopScanner();
+            }
+        }
 
         document.getElementById('inputExcel').addEventListener('change', e => {
             const file = e.target.files[0];
@@ -105,7 +154,7 @@
 
         function startScanner() {
             if (poData.length === 0) {
-                alert("กรุณาอัปโหลดไฟล์ PO ก่อนเริ่มสแกนครับ!");
+                alert("กรุณาอัปโหลดไฟล์ PO ก่อนเริ่มสแกนครับ หรือสลับไปโหมด 'คีย์เองอิสระ'");
                 return;
             }
             html5QrCode = new Html5Qrcode("reader");
@@ -131,9 +180,9 @@
 
             if (barcodeMap[barcode] !== undefined) {
                 const itemIndex = barcodeMap[barcode];
-                currentItem = poData[itemIndex];
+                currentItem = { type: 'po', index: itemIndex, data: poData[itemIndex] };
                 
-                document.getElementById('itemName').textContent = currentItem.Description || currentItem.Code;
+                document.getElementById('itemName').textContent = poData[itemIndex].Description || poData[itemIndex].Code;
                 document.getElementById('currentBarcode').textContent = barcode;
                 document.getElementById('qtyInput').value = "1";
                 document.getElementById('countPanel').classList.remove('hidden');
@@ -176,16 +225,15 @@
             barcodeMap[scannedTempBarcode] = parseInt(idx);
             poData[idx].Barcode = scannedTempBarcode;
 
-            currentItem = poData[idx];
+            currentItem = { type: 'po', index: parseInt(idx), data: poData[idx] };
             document.getElementById('mapPanel').classList.add('hidden');
             
-            document.getElementById('itemName').textContent = currentItem.Description || currentItem.Code;
+            document.getElementById('itemName').textContent = poData[idx].Description || poData[idx].Code;
             document.getElementById('currentBarcode').textContent = scannedTempBarcode;
             document.getElementById('qtyInput').value = "1";
             document.getElementById('countPanel').classList.remove('hidden');
         }
 
-        // Manual Search Functions
         function searchManualItem() {
             if (poData.length === 0) {
                 alert("กรุณาอัปโหลดไฟล์ PO ก่อนครับ!");
@@ -212,9 +260,9 @@
                 btn.className = 'w-full text-left bg-stone-100 hover:bg-amber-100 p-1.5 rounded text-xs border border-stone-200 truncate';
                 btn.textContent = `${item.Code} - ${item.Description}`;
                 btn.onclick = () => {
-                    currentItem = item;
+                    currentItem = { type: 'po', index: item._index, data: item };
                     document.getElementById('itemName').textContent = item.Description || item.Code;
-                    document.getElementById('currentBarcode').textContent = item.Barcode || '(พิมพ์ค้นหาเอง)';
+                    document.getElementById('currentBarcode').textContent = item.Barcode || '(ค้นหาด้วยชื่อ)';
                     document.getElementById('qtyInput').value = "1";
                     document.getElementById('countPanel').classList.remove('hidden');
                     document.getElementById('manualResultList').innerHTML = '';
@@ -224,52 +272,143 @@
             });
         }
 
+        function addCustomItem() {
+            const code = document.getElementById('customCode').value.trim();
+            const desc = document.getElementById('customDesc').value.trim();
+            const qty = parseInt(document.getElementById('customQty').value) || 0;
+
+            if (!code && !desc) {
+                alert("กรุณากรอกรหัสสินค้าหรือชื่อสินค้าอย่างน้อยหนึ่งช่องครับ!");
+                return;
+            }
+
+            // Check if exists in customItems
+            const existing = customItems.find(i => i.Code === code && code !== "");
+            if (existing) {
+                existing.Counted_Qty += qty;
+                alert(`อัปเดตยอด "${existing.Description || existing.Code}" เพิ่มอีก ${qty} (ยอดรวม: ${existing.Counted_Qty})`);
+            } else {
+                customItems.push({
+                    'Code': code,
+                    'Description': desc,
+                    'Counted_Qty': qty
+                });
+            }
+
+            document.getElementById('customCode').value = '';
+            document.getElementById('customDesc').value = '';
+            document.getElementById('customQty').value = '1';
+            document.getElementById('customCode').focus();
+
+            updateSummaryUI();
+        }
+
         function saveCount() {
             const qty = parseInt(document.getElementById('qtyInput').value) || 0;
-            const idx = currentItem._index;
-
-            countedData[idx] = (countedData[idx] || 0) + qty;
-            
-            alert(`บันทึกสำเร็จ!\n${currentItem.Description}\nยอดสะสมรวม: ${countedData[idx]}`);
+            if (currentItem.type === 'po') {
+                const idx = currentItem.index;
+                countedData[idx] = (countedData[idx] || 0) + qty;
+                alert(`บันทึกสำเร็จ!\n${currentItem.data.Description}\nยอดสะสมรวม: ${countedData[idx]}`);
+            }
             document.getElementById('countPanel').classList.add('hidden');
+            updateSummaryUI();
+        }
+
+        function removePoCount(idx) {
+            delete countedData[idx];
+            updateSummaryUI();
+        }
+
+        function removeCustomItem(index) {
+            customItems.splice(index, 1);
             updateSummaryUI();
         }
 
         function updateSummaryUI() {
             const summaryDiv = document.getElementById('summaryList');
-            const keys = Object.keys(countedData);
-            if (keys.length === 0) {
+            const poKeys = Object.keys(countedData);
+            const totalItemsCount = poKeys.length + customItems.length;
+            document.getElementById('totalCountedItems').textContent = totalItemsCount;
+
+            if (totalItemsCount === 0) {
                 summaryDiv.innerHTML = "ยังไม่มีการบันทึกข้อมูล";
                 return;
             }
 
-            let html = "<ul class='space-y-1'>";
-            keys.forEach(idx => {
+            let html = "";
+            
+            // Render PO Counted items
+            poKeys.forEach(idx => {
                 const item = poData[idx];
-                html += `<li><b>${item.Description}</b>: <span class="text-emerald-700 font-bold">${countedData[idx]}</span></li>`;
+                html += `
+                    <div class="flex justify-between items-center bg-white p-1.5 rounded border border-stone-200 mb-1">
+                        <div>
+                            <b>${item.Description || item.Code}</b><br>
+                            <span class="text-[10px] text-stone-400">รหัส: ${item.Code || '-'}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-emerald-700 font-bold text-sm">${countedData[idx]}</span>
+                            <button onclick="removePoCount(${idx})" class="text-rose-600 font-bold px-1">✕</button>
+                        </div>
+                    </div>
+                `;
             });
-            html += "</ul>";
+
+            // Render Custom items
+            customItems.forEach((item, index) => {
+                html += `
+                    <div class="flex justify-between items-center bg-white p-1.5 rounded border border-stone-200 mb-1">
+                        <div>
+                            <b>${item.Description || '(ไม่มีชื่อ)'}</b> <span class="text-[10px] bg-amber-100 text-amber-800 px-1 rounded">พิมพ์เอง</span><br>
+                            <span class="text-[10px] text-stone-400">รหัส: ${item.Code || '-'}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-emerald-700 font-bold text-sm">${item.Counted_Qty}</span>
+                            <button onclick="removeCustomItem(${index})" class="text-rose-600 font-bold px-1">✕</button>
+                        </div>
+                    </div>
+                `;
+            });
+
             summaryDiv.innerHTML = html;
         }
 
         function exportExcel() {
-            if (poData.length === 0) {
+            const poKeys = Object.keys(countedData);
+            if (poKeys.length === 0 && customItems.length === 0) {
                 alert("ไม่มีข้อมูลสำหรับ Export ครับ");
                 return;
             }
 
-            const exportList = poData.map((item, idx) => {
-                const cleanItem = {...item};
-                delete cleanItem._index;
-                cleanItem['Barcode'] = cleanItem['Barcode'] || '';
-                cleanItem['Counted_Qty'] = countedData[idx] || 0;
-                return cleanItem;
-            });
+            let exportList = [];
+
+            // If PO data was loaded, export full PO with updated counted quantities
+            if (poData.length > 0) {
+                exportList = poData.map((item, idx) => {
+                    const cleanItem = {...item};
+                    delete cleanItem._index;
+                    cleanItem['Barcode'] = cleanItem['Barcode'] || '';
+                    cleanItem['Counted_Qty'] = countedData[idx] || 0;
+                    return cleanItem;
+                });
+            }
+
+            // Append fully custom items if any
+            if (customItems.length > 0) {
+                customItems.forEach(ci => {
+                    exportList.push({
+                        'Code': ci.Code,
+                        'Description': ci.Description,
+                        'Barcode': '',
+                        'Counted_Qty': ci.Counted_Qty
+                    });
+                });
+            }
 
             const ws = XLSX.utils.json_to_sheet(exportList);
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Inventory_Count");
-            XLSX.writeFile(wb, "Navera_Inventory_Result.xlsx");
+            XLSX.utils.book_append_sheet(wb, ws, "Inventory_Result");
+            XLSX.writeFile(wb, "Navera_Complete_Inventory.xlsx");
         }
     </script>
 </body>
