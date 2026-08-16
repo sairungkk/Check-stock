@@ -20,7 +20,7 @@
         <!-- Tab Switcher -->
         <div class="flex bg-stone-200 p-1 rounded-xl mb-4 text-xs font-bold">
             <button onclick="switchTab('po')" id="tabPoBtn" class="flex-1 py-2 rounded-lg bg-white text-amber-900 shadow">📁 นับจาก PO / สแกน</button>
-            <button onclick="switchTab('manual')" id="tabManualBtn" class="flex-1 py-2 rounded-lg text-stone-600">✍️ คีย์เองอิสระ</button>
+            <button onclick="switchTab('manual')" id="tabManualBtn" class="flex-1 py-2 rounded-lg text-stone-600">✍️ คีย์เอง + สแกนบาร์โค้ด</button>
         </div>
 
         <!-- ================= MODE 1: PO & SCANNER ================= -->
@@ -36,7 +36,7 @@
             <div class="card p-4">
                 <div id="reader" class="w-full h-48 bg-black rounded overflow-hidden"></div>
                 <div class="flex gap-2 mt-3">
-                    <button onclick="startScanner()" class="flex-1 bg-amber-700 text-white py-2 rounded font-bold text-sm">📷 เปิดกล้องสแกน</button>
+                    <button onclick="startScanner('po')" class="flex-1 bg-amber-700 text-white py-2 rounded font-bold text-sm">📷 เปิดกล้องสแกน</button>
                     <button onclick="stopScanner()" class="flex-1 bg-stone-600 text-white py-2 rounded font-bold text-sm">⏹️ ปิดกล้อง</button>
                 </div>
             </div>
@@ -52,18 +52,28 @@
             </div>
         </div>
 
-        <!-- ================= MODE 2: FULL MANUAL ENTRY ================= -->
+        <!-- ================= MODE 2: FULL MANUAL ENTRY + SCANNER ================= -->
         <div id="sectionManual" class="space-y-4 hidden">
+            <!-- Scanner Section for Manual -->
+            <div class="card p-4 border-l-4 border-emerald-600">
+                <h3 class="font-bold text-stone-700 text-sm mb-2">📷 สแกนบาร์โค้ดเพื่อเพิ่ม/นับสินค้า</h3>
+                <div id="readerManual" class="w-full h-40 bg-black rounded overflow-hidden mb-3"></div>
+                <div class="flex gap-2">
+                    <button onclick="startScanner('manual')" class="flex-1 bg-emerald-700 text-white py-2 rounded font-bold text-sm">📷 เปิดกล้องสแกน</button>
+                    <button onclick="stopScanner()" class="flex-1 bg-stone-600 text-white py-2 rounded font-bold text-sm">⏹️ ปิดกล้อง</button>
+                </div>
+            </div>
+
             <div class="card p-4 border-l-4 border-amber-600">
-                <h3 class="font-bold text-stone-700 text-sm mb-3">✍️ พิมพ์เพิ่มรหัสและสินค้าเอง</h3>
+                <h3 class="font-bold text-stone-700 text-sm mb-3">✍️ พิมพ์หรือสแกนเพิ่มรหัสสินค้าเอง</h3>
                 <div class="space-y-3">
                     <div>
-                        <label class="block text-xs font-bold text-stone-600 mb-1">รหัสสินค้า (Code):</label>
-                        <input type="text" id="customCode" class="w-full border rounded p-2 text-sm" placeholder="เช่น BEER01">
+                        <label class="block text-xs font-bold text-stone-600 mb-1">รหัสสินค้า / บาร์โค้ด (Code):</label>
+                        <input type="text" id="customCode" class="w-full border rounded p-2 text-sm font-mono" placeholder="สแกนบาร์โค้ดหรือพิมพ์รหัส...">
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-stone-600 mb-1">ชื่อสินค้า (Description):</label>
-                        <input type="text" id="customDesc" class="w-full border rounded p-2 text-sm" placeholder="เช่น Heineken 330ml">
+                        <input type="text" id="customDesc" class="w-full border rounded p-2 text-sm" placeholder="เช่น น้ำดื่ม 600ml">
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-stone-600 mb-1">จำนวน (Qty):</label>
@@ -74,7 +84,7 @@
             </div>
         </div>
 
-        <!-- Count Panel (Shared when item is selected/scanned) -->
+        <!-- Count Panel (Shared when item is selected/scanned in PO) -->
         <div id="countPanel" class="card p-4 my-4 hidden border-2 border-emerald-500">
             <h3 class="text-xs text-stone-500">กำลังนับสินค้ารายการนี้:</h3>
             <h2 id="itemName" class="font-bold text-amber-900 text-base mb-1"></h2>
@@ -107,16 +117,17 @@
 
     <script>
         let poData = [];
-        let countedData = {}; // index or unique key -> qty
-        let customItems = []; // For items added completely manually
+        let countedData = {}; 
+        let customItems = []; 
         let barcodeMap = {};  
         let currentItem = null;
         let scannedTempBarcode = "";
         let html5QrCode;
-        let currentMode = 'po'; // 'po' or 'manual'
+        let currentMode = 'po'; 
 
         function switchTab(mode) {
             currentMode = mode;
+            stopScanner();
             if (mode === 'po') {
                 document.getElementById('sectionPo').classList.remove('hidden');
                 document.getElementById('sectionManual').classList.add('hidden');
@@ -127,7 +138,6 @@
                 document.getElementById('sectionManual').classList.remove('hidden');
                 document.getElementById('tabPoBtn').className = "flex-1 py-2 rounded-lg text-stone-600";
                 document.getElementById('tabManualBtn').className = "flex-1 py-2 rounded-lg bg-white text-amber-900 shadow";
-                stopScanner();
             }
         }
 
@@ -152,24 +162,38 @@
             reader.readAsBinaryString(file);
         });
 
-        function startScanner() {
-            if (poData.length === 0) {
-                alert("กรุณาอัปโหลดไฟล์ PO ก่อนเริ่มสแกนครับ หรือสลับไปโหมด 'คีย์เองอิสระ'");
-                return;
-            }
-            html5QrCode = new Html5Qrcode("reader");
+        function startScanner(targetMode) {
+            stopScanner();
+            const elementId = targetMode === 'po' ? 'reader' : 'readerManual';
+            
+            html5QrCode = new Html5Qrcode(elementId);
             html5QrCode.start(
                 { facingMode: "environment" }, 
                 { fps: 10, qrbox: 200 }, 
                 (decodedText) => {
-                    handleScannedCode(decodedText.trim());
+                    const code = decodedText.trim();
                     stopScanner();
+
+                    if (targetMode === 'po') {
+                        handleScannedCode(code);
+                    } else {
+                        // โหมดคีย์เอง: นำบาร์โค้ดที่สแกนได้ใส่ในช่องรหัสสินค้าอัตโนมัติ
+                        document.getElementById('customCode').value = code;
+                        document.getElementById('customDesc').focus();
+                        
+                        // เช็คว่ามีสินค้านี้อยู่แล้วในรายการคีย์เองไหม ถ้ามีให้บวกจำนวนเพิ่ม หรือแจ้งเตือน
+                        const existing = customItems.find(i => i.Code === code);
+                        if (existing) {
+                            document.getElementById('customDesc').value = existing.Description;
+                            alert(`พบบาร์โค้ดนี้ในระบบแล้ว (${existing.Description || code}) สามารถกดเพิ่มจำนวนได้เลย`);
+                        }
+                    }
                 }
             ).catch(err => alert("ไม่สามารถเปิดกล้องได้: " + err));
         }
 
         function stopScanner() { 
-            if(html5QrCode) {
+            if(html5QrCode && html5QrCode.isScanning) {
                 html5QrCode.stop().then(() => html5QrCode.clear()).catch(() => {});
             }
         }
@@ -282,7 +306,6 @@
                 return;
             }
 
-            // Check if exists in customItems
             const existing = customItems.find(i => i.Code === code && code !== "");
             if (existing) {
                 existing.Counted_Qty += qty;
@@ -337,7 +360,6 @@
 
             let html = "";
             
-            // Render PO Counted items
             poKeys.forEach(idx => {
                 const item = poData[idx];
                 html += `
@@ -354,13 +376,12 @@
                 `;
             });
 
-            // Render Custom items
             customItems.forEach((item, index) => {
                 html += `
                     <div class="flex justify-between items-center bg-white p-1.5 rounded border border-stone-200 mb-1">
                         <div>
-                            <b>${item.Description || '(ไม่มีชื่อ)'}</b> <span class="text-[10px] bg-amber-100 text-amber-800 px-1 rounded">พิมพ์เอง</span><br>
-                            <span class="text-[10px] text-stone-400">รหัส: ${item.Code || '-'}</span>
+                            <b>${item.Description || '(ไม่มีชื่อ)'}</b> <span class="text-[10px] bg-amber-100 text-amber-800 px-1 rounded">คีย์เอง</span><br>
+                            <span class="text-[10px] text-stone-400">รหัส/บาร์โค้ด: ${item.Code || '-'}</span>
                         </div>
                         <div class="flex items-center gap-2">
                             <span class="text-emerald-700 font-bold text-sm">${item.Counted_Qty}</span>
@@ -382,7 +403,6 @@
 
             let exportList = [];
 
-            // If PO data was loaded, export full PO with updated counted quantities
             if (poData.length > 0) {
                 exportList = poData.map((item, idx) => {
                     const cleanItem = {...item};
@@ -393,13 +413,12 @@
                 });
             }
 
-            // Append fully custom items if any
             if (customItems.length > 0) {
                 customItems.forEach(ci => {
                     exportList.push({
                         'Code': ci.Code,
                         'Description': ci.Description,
-                        'Barcode': '',
+                        'Barcode': ci.Code,
                         'Counted_Qty': ci.Counted_Qty
                     });
                 });
