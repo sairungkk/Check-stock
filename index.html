@@ -1,0 +1,102 @@
+
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Navera Inventory Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background-color: #fdfbf7; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    </style>
+</head>
+<body class="p-4">
+
+    <div class="max-w-md mx-auto">
+        <h1 class="text-xl font-bold text-amber-900 mb-4 text-center">Navera Inventory Scanner</h1>
+        
+        <!-- Import PO -->
+        <div class="card p-4 mb-4 border-l-4 border-amber-600">
+            <label class="block text-sm font-bold mb-2">1. Import PO (.xlsx)</label>
+            <input type="file" id="inputExcel" class="w-full text-sm">
+        </div>
+
+        <!-- Scanner Section -->
+        <div class="card p-4 mb-4">
+            <div id="reader" class="w-full h-48 bg-black rounded overflow-hidden"></div>
+            <div class="flex gap-2 mt-3">
+                <button onclick="startScanner()" class="flex-1 bg-amber-700 text-white py-2 rounded font-bold">📷 สแกนสินค้า</button>
+                <button onclick="stopScanner()" class="flex-1 bg-stone-600 text-white py-2 rounded font-bold">⏹️ หยุด</button>
+            </div>
+        </div>
+
+        <!-- Count Display -->
+        <div id="countPanel" class="card p-4 hidden">
+            <h2 id="itemName" class="font-bold text-amber-900"></h2>
+            <div class="flex gap-2 mt-3">
+                <input type="number" id="qtyInput" class="w-20 border rounded p-2" placeholder="จำนวน">
+                <button onclick="saveCount()" class="flex-1 bg-emerald-600 text-white rounded font-bold">บันทึก</button>
+            </div>
+        </div>
+
+        <button onclick="exportExcel()" class="w-full bg-blue-700 text-white py-3 rounded-lg font-bold mt-4">📥 Export รายการที่นับแล้ว</button>
+    </div>
+
+    <script>
+        let poData = [];
+        let countedData = {};
+        let currentItem = null;
+        let html5QrCode;
+
+        document.getElementById('inputExcel').addEventListener('change', e => {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = e => {
+                const workbook = XLSX.read(e.target.result, {type: 'binary'});
+                poData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+                alert("โหลด PO เรียบร้อย!");
+            };
+            reader.readAsBinaryString(file);
+        });
+
+        function startScanner() {
+            html5QrCode = new Html5Qrcode("reader");
+            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 200 }, (decodedText) => {
+                const found = poData.find(item => String(item.Barcode) === String(decodedText));
+                if (found) {
+                    currentItem = found;
+                    document.getElementById('itemName').textContent = found.Description;
+                    document.getElementById('countPanel').classList.remove('hidden');
+                    stopScanner();
+                } else {
+                    alert("ไม่พบสินค้าในระบบ!");
+                }
+            });
+        }
+
+        function stopScanner() { if(html5QrCode) html5QrCode.stop().then(() => html5QrCode.clear()); }
+
+        function saveCount() {
+            const qty = parseInt(document.getElementById('qtyInput').value);
+            const code = currentItem.Code;
+            countedData[code] = (countedData[code] || 0) + qty;
+            alert("บันทึกแล้ว: " + currentItem.Description + " ยอดรวม: " + countedData[code]);
+            document.getElementById('countPanel').classList.add('hidden');
+        }
+
+        function exportExcel() {
+            const exportList = poData.map(item => ({
+                ...item,
+                'Counted': countedData[item.Code] || 0
+            }));
+            const ws = XLSX.utils.json_to_sheet(exportList);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Inventory");
+            XLSX.writeFile(wb, "Inventory_Count_Result.xlsx");
+        }
+    </script>
+</body>
+</html>
