@@ -1,0 +1,226 @@
+
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Navera Inventory Scanner & Mapper</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background-color: #fdfbf7; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    </style>
+</head>
+<body class="p-4">
+
+    <div class="max-w-md mx-auto">
+        <h1 class="text-xl font-bold text-amber-900 mb-4 text-center">Navera Inventory Scanner</h1>
+        
+        <!-- Import PO -->
+        <div class="card p-4 mb-4 border-l-4 border-amber-600">
+            <label class="block text-sm font-bold mb-2">1. Import PO (.xlsx)</label>
+            <input type="file" id="inputExcel" class="w-full text-sm">
+            <p id="poStatus" class="text-xs text-stone-500 mt-1">ยังไม่ได้โหลดไฟล์ PO</p>
+        </div>
+
+        <!-- Scanner Section -->
+        <div class="card p-4 mb-4">
+            <div id="reader" class="w-full h-48 bg-black rounded overflow-hidden"></div>
+            <div class="flex gap-2 mt-3">
+                <button onclick="startScanner()" class="flex-1 bg-amber-700 text-white py-2 rounded font-bold">📷 เปิดกล้องสแกน</button>
+                <button onclick="stopScanner()" class="flex-1 bg-stone-600 text-white py-2 rounded font-bold">⏹️ ปิดกล้อง</button>
+            </div>
+        </div>
+
+        <!-- Count Panel (When found) -->
+        <div id="countPanel" class="card p-4 mb-4 hidden border-2 border-emerald-500">
+            <h3 class="text-xs text-stone-500">สินค้ารายการนี้:</h3>
+            <h2 id="itemName" class="font-bold text-amber-900 text-lg mb-2"></h2>
+            <p class="text-xs text-stone-600 mb-2">บาร์โค้ด: <span id="currentBarcode" class="font-mono font-bold"></span></p>
+            <div class="flex gap-2">
+                <input type="number" id="qtyInput" class="w-24 border rounded p-2 font-bold text-lg text-center" value="1" placeholder="จำนวน">
+                <button onclick="saveCount()" class="flex-1 bg-emerald-600 text-white rounded font-bold py-2">บันทึกยอดนับ</button>
+            </div>
+        </div>
+
+        <!-- Mapping Panel (When Barcode not found in PO) -->
+        <div id="mapPanel" class="card p-4 mb-4 hidden border-2 border-amber-500">
+            <h3 class="text-sm font-bold text-rose-600 mb-1">❌ ไม่พบบาร์โค้ดนี้ในระบบ</h3>
+            <p class="text-xs text-stone-600 mb-3">บาร์โค้ดใหม่: <span id="newBarcode" class="font-mono font-bold"></span></p>
+            <label class="block text-xs font-bold mb-1 text-stone-700">เลือกสินค้าใน PO เพื่อผูกกับบาร์โค้ดนี้:</label>
+            <select id="poSelectDropdown" class="w-full border rounded p-2 text-sm mb-3 bg-stone-50"></select>
+            <button onclick="bindAndCount()" class="w-full bg-amber-700 text-white rounded font-bold py-2">🔗 ผูกบาร์โค้ดและไปต่อ</button>
+        </div>
+
+        <!-- Summary & Export -->
+        <div class="card p-4">
+            <h3 class="font-bold text-stone-700 text-sm mb-2">📊 สรุปรายการที่นับแล้ว</h3>
+            <div id="summaryList" class="text-xs text-stone-600 max-h-40 overflow-y-auto mb-3 border p-2 rounded bg-stone-50">
+                ยังไม่มีการบันทึกข้อมูล
+            </div>
+            <button onclick="exportExcel()" class="w-full bg-blue-700 text-white py-3 rounded-lg font-bold">📥 Export เป็นไฟล์ Excel</button>
+        </div>
+    </div>
+
+    <script>
+        let poData = [];
+        let countedData = {}; // เก็บยอดนับ key = Code หรือ Index, value = total qty
+        let barcodeMap = {};  // เก็บความสัมพันธ์ barcode -> item Code
+        let currentItem = null;
+        let scannedTempBarcode = "";
+        let html5QrCode;
+
+        document.getElementById('inputExcel').addEventListener('change', e => {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = e => {
+                const workbook = XLSX.read(e.target.result, {type: 'binary'});
+                const sheetName = workbook.SheetNames[0];
+                poData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+                
+                // ตรวจสอบว่ามี Barcode เดิมไหม ถ้ามีให้นำมาใส่ใน barcodeMap
+                poData.forEach((item, idx) => {
+                    item._index = idx; // เก็บ index ไว้ใช้อ้างอิง
+                    if (item.Barcode) {
+                        barcodeMap[String(item.Barcode).trim()] = idx;
+                    }
+                });
+
+                document.getElementById('poStatus').textContent = `โหลดสำเร็จ: ${poData.length} รายการ`;
+                alert("โหลดไฟล์ PO สำเร็จ! พร้อมสแกนแล้วครับ");
+            };
+            reader.readAsBinaryString(file);
+        });
+
+        function startScanner() {
+            if (poData.length === 0) {
+                alert("กรุณาอัปโหลดไฟล์ PO ก่อนเริ่มสแกนครับ!");
+                return;
+            }
+            html5QrCode = new Html5Qrcode("reader");
+            html5QrCode.start(
+                { facingMode: "environment" }, 
+                { fps: 10, qrbox: 200 }, 
+                (decodedText) => {
+                    handleScannedCode(decodedText.trim());
+                    stopScanner();
+                }
+            ).catch(err => alert("ไม่สามารถเปิดกล้องได้: " + err));
+        }
+
+        function stopScanner() { 
+            if(html5QrCode) {
+                html5QrCode.stop().then(() => html5QrCode.clear()).catch(() => {});
+            }
+        }
+
+        function handleScannedCode(barcode) {
+            // ซ่อนพาเนลเดิมก่อน
+            document.getElementById('countPanel').classList.add('hidden');
+            document.getElementById('mapPanel').classList.add('hidden');
+
+            if (barcodeMap[barcode] !== undefined) {
+                // เจอ Barcode แล้ว!
+                const itemIndex = barcodeMap[barcode];
+                currentItem = poData[itemIndex];
+                
+                document.getElementById('itemName').textContent = currentItem.Description || currentItem.Code;
+                document.getElementById('currentBarcode').textContent = barcode;
+                document.getElementById('qtyInput').value = "1";
+                document.getElementById('countPanel').classList.remove('hidden');
+            } else {
+                // ไม่เจอ Barcode -> เข้าสู่โหมด Learning/Mapping
+                scannedTempBarcode = barcode;
+                document.getElementById('newBarcode').textContent = barcode;
+                
+                // เติมข้อมูลลง Dropdown ให้ผู้ใช้เลือก
+                const select = document.getElementById('poSelectDropdown');
+                select.innerHTML = '<option value="">-- กรุณาเลือกชื่อสินค้าใน PO --</option>';
+                poData.forEach((item, idx) => {
+                    const opt = document.createElement('option');
+                    opt.value = idx;
+                    opt.textContent = `${item.Code || ''} - ${item.Description || 'No Name'}`;
+                    select.appendChild(opt);
+                });
+
+                document.getElementById('mapPanel').classList.remove('hidden');
+            }
+        }
+
+        function bindAndCount() {
+            const select = document.getElementById('poSelectDropdown');
+            const idx = select.value;
+            if (idx === "") {
+                alert("กรุณาเลือกสินค้าใน PO ก่อนครับ!");
+                return;
+            }
+
+            // ผูก Barcode เข้ากับสินค้าตัวนี้
+            barcodeMap[scannedTempBarcode] = parseInt(idx);
+            poData[idx].Barcode = scannedTempBarcode; // บันทึกลงข้อมูลด้วย
+
+            currentItem = poData[idx];
+            document.getElementById('mapPanel').classList.add('hidden');
+            
+            // เปิดหน้าจอให้ใส่จำนวนต่อ
+            document.getElementById('itemName').textContent = currentItem.Description || currentItem.Code;
+            document.getElementById('currentBarcode').textContent = scannedTempBarcode;
+            document.getElementById('qtyInput').value = "1";
+            document.getElementById('countPanel').classList.remove('hidden');
+        }
+
+        function saveCount() {
+            const qty = parseInt(document.getElementById('qtyInput').value) || 0;
+            const idx = currentItem._index;
+
+            countedData[idx] = (countedData[idx] || 0) + qty;
+            
+            alert(`บันทึกสำเร็จ!
+${currentItem.Description}
+ยอดสะสมรวม: ${countedData[idx]}`);
+            document.getElementById('countPanel').classList.add('hidden');
+            updateSummaryUI();
+        }
+
+        function updateSummaryUI() {
+            const summaryDiv = document.getElementById('summaryList');
+            const keys = Object.keys(countedData);
+            if (keys.length === 0) {
+                summaryDiv.innerHTML = "ยังไม่มีการบันทึกข้อมูล";
+                return;
+            }
+
+            let html = "<ul class='space-y-1'>";
+            keys.forEach(idx => {
+                const item = poData[idx];
+                html += `<li><b>${item.Description}</b>: <span class="text-emerald-700 font-bold">${countedData[idx]}</span></li>`;
+            });
+            html += "</ul>";
+            summaryDiv.innerHTML = html;
+        }
+
+        function exportExcel() {
+            if (poData.length === 0) {
+                alert("ไม่มีข้อมูลสำหรับ Export ครับ");
+                return;
+            }
+
+            // สร้างข้อมูลสำหรับ Export โดยเพิ่มคอลัมน์ Barcode และ Counted
+            const exportList = poData.map((item, idx) => {
+                const cleanItem = {...item};
+                delete cleanItem._index; // ลบตัวแปรชั่วคราวออก
+                cleanItem['Barcode'] = cleanItem['Barcode'] || '';
+                cleanItem['Counted_Qty'] = countedData[idx] || 0;
+                return cleanItem;
+            });
+
+            const ws = XLSX.utils.json_to_sheet(exportList);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Inventory_Count");
+            XLSX.writeFile(wb, "Navera_Inventory_Result.xlsx");
+        }
+    </script>
+</body>
+</html>
