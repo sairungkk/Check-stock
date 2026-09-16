@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Navera Ultimate Inventory Suite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background-color: #fdfbf7; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+            select:focus, input:focus { outline: 2px solid rgba(217,119,6,.25); outline-offset: 1px; }
+        #progressText { font-weight: 600; }
+        .toast-item { white-space: pre-line; animation: toastIn .2s ease-out; }
+        @keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="p-4">
+
+    <!-- Toast: แจ้งเตือนแบบไม่บล็อกการทำงาน (ใช้แทน alert) -->
+    <div id="toastBox" class="fixed top-3 left-0 right-0 z-[70] flex flex-col items-center gap-2 px-4 pointer-events-none"></div>
+
+    <div class="max-w-md mx-auto">
+        <h1 class="text-xl font-bold text-amber-900 mb-2 text-center">Navera Inventory Suite</h1>
+        <div class="flex gap-2 mb-3">
+            <button onclick="createNewSession()" class="flex-1 bg-stone-800 text-white py-2 rounded-lg font-bold text-xs">🆕 รอบนับใหม่</button>
+            <button onclick="clearSession()" class="bg-rose-600 text-white px-3 py-2 rounded-lg font-bold text-xs">🗑️ ล้าง</button>
+        </div>
+        <div id="sessionStatus" class="text-center text-xs text-stone-500 mb-3">ยังไม่ได้สร้างรอบนับ</div>
+        
+        <!-- Tab Switcher -->
+        <div class="flex bg-stone-200 p-1 rounded-xl mb-4 text-xs font-bold">
+            <button onclick="switchTab('po')" id="tabPoBtn" class="flex-1 py-2 rounded-lg bg-white text-amber-900 shadow">📁 นับจากไฟล์ PO</button>
+            <button onclick="switchTab('manual')" id="tabManualBtn" class="flex-1 py-2 rounded-lg text-stone-600">✍️ คีย์เอง + สแกน</button>
+        </div>
+
+        <!-- ================= MODE 1: PO & SCANNER ================= -->
+        <div id="sectionPo" class="space-y-4">
+            <div class="card p-4 border-l-4 border-amber-600">
+                <label class="block text-sm font-bold mb-2">1. อัปโหลดไฟล์ Excel (.xlsx)</label>
+                <input type="file" id="inputExcel" class="w-full text-sm">
+                <p id="poStatus" class="text-xs text-stone-500 mt-1">ยังไม่ได้โหลดไฟล์</p>
+            </div>
+
+            <div class="card p-4">
+                <div id="reader" class="w-full h-48 bg-black rounded overflow-hidden"></div>
+                <div class="flex gap-2 mt-3">
+                    <button onclick="startScanner('po')" class="flex-1 bg-amber-700 text-white py-2 rounded font-bold text-sm">📷 เปิดกล้องสแกน</button>
+                    <button onclick="stopScanner()" class="flex-1 bg-stone-600 text-white py-2 rounded font-bold text-sm">⏹️ ปิดกล้อง</button>
+                </div>
+                <label class="flex items-center gap-2 mt-3 text-xs font-bold text-stone-700">
+                    <input type="checkbox" id="continuousScan" checked class="w-4 h-4 accent-amber-700">
+                    🔄 โหมดสแกนต่อเนื่อง — บันทึกแล้ว สแกนรายการถัดไปได้เลย
+                </label>
+            </div>
+
+            <div class="card p-4 border-2 border-stone-300">
+                <h3 class="text-xs font-bold text-stone-700 mb-1">🔍 ค้นหาชื่อสินค้า (พิมพ์เพื่อเลือกนับ)</h3>
+                <input type="text" id="liveSearchInput" oninput="onLiveSearchInput()" class="w-full border rounded p-2 text-sm mb-2" placeholder="พิมพ์ชื่อหรือรหัสสินค้า...">
+                <div id="liveResultList" class="max-h-40 overflow-y-auto space-y-1"></div>
+            </div>
+        </div>
+
+        <!-- ================= MODE 2: MANUAL ENTRY ================= -->
+        <div id="sectionManual" class="space-y-4 hidden">
+            <div class="card p-4 border-l-4 border-emerald-600">
+                <h3 class="font-bold text-stone-700 text-sm mb-2">📷 สแกนเพิ่มรายการใหม่</h3>
+                <div id="readerManual" class="w-full h-40 bg-black rounded overflow-hidden mb-3"></div>
+                <button onclick="startScanner('manual')" class="w-full bg-emerald-700 text-white py-2 rounded font-bold text-sm">📷 เปิดกล้องสแกน</button>
+                <label class="flex items-center gap-2 mt-2 text-xs font-bold text-stone-700">
+                    <input type="checkbox" id="continuousScanManual" class="w-4 h-4 accent-emerald-700">
+                    🔄 สแกนต่อเนื่อง (กล้องไม่หยุด)
+                </label>
+            </div>
+            <div class="card p-4 border-l-4 border-amber-600 space-y-2">
+                <h3 class="font-bold text-stone-700 text-sm">✍️ เพิ่มสินค้าใหม่ (ไม่มีในไฟล์ PO)</h3>
+                <input type="text" id="customCode" class="w-full border rounded p-2 text-sm" placeholder="รหัสสินค้า / บาร์โค้ด (Code)">
+                <input type="text" id="customDesc" class="w-full border rounded p-2 text-sm" placeholder="ชื่อสินค้า (Description)">
+                <div class="grid grid-cols-2 gap-2">
+                    <input type="text" id="customUnit" class="w-full border rounded p-2 text-sm" placeholder="Unit (เช่น btl, can)">
+                    <input type="text" id="customSubUnit" class="w-full border rounded p-2 text-sm" placeholder="Sub unit (เช่น oz, gl)">
+                </div>
+                <input type="number" id="customSubUnitItem" class="w-full border rounded p-2 text-sm" placeholder="จำนวน Sub unit ต่อ 1 Unit (ถ้ามี เช่น 22) - ไม่บังคับ">
+
+                <div class="bg-stone-50 p-3 rounded border space-y-1">
+                    <label class="block text-xs font-bold text-stone-700">1. Count by Unit (btl/can)</label>
+                    <input type="text" id="customQtyUnit" readonly onclick="openKeypad('customQtyUnit', 'Count by Unit')" class="w-full border rounded p-2 font-bold text-center text-emerald-700 text-lg bg-white cursor-pointer" value="0">
+                </div>
+                <div class="bg-stone-50 p-3 rounded border space-y-1">
+                    <label class="block text-xs font-bold text-stone-700">2. Count by Sub Unit (oz/gl)</label>
+                    <input type="text" id="customQtySubUnit" readonly onclick="openKeypad('customQtySubUnit', 'Count by Sub Unit')" class="w-full border rounded p-2 font-bold text-center text-amber-700 text-lg bg-white cursor-pointer" value="0">
+                </div>
+
+                <button onclick="addCustomItem()" class="w-full bg-amber-700 text-white py-2 rounded font-bold text-sm">➕ เพิ่มรายการ</button>
+            </div>
+        </div>
+
+
+        <!-- Count Panel -->
+        <div id="countPanel" class="card p-4 my-4 hidden border-2 border-emerald-500 space-y-3">
+            <div>
+                <h3 class="text-xs text-stone-500">กำลังนับสินค้ารายการนี้:</h3>
+                <h2 id="itemName" class="font-bold text-amber-900 text-base mb-1"></h2>
+                <p class="text-xs text-stone-600">รหัส: <span id="currentBarcode" class="font-mono font-bold">-</span></p>
+            </div>
+
+            <div id="itemHistoryBox" class="hidden bg-amber-50 border border-amber-300 rounded p-2 text-xs space-y-1">
+                <p class="font-bold text-amber-800">🕒 เคยนับไปแล้ว (จุดอื่น) — กด 🗑️ หน้ารายการที่คีย์ผิดเพื่อลบ:</p>
+                <div id="itemHistoryList" class="space-y-0.5"></div>
+                <p class="font-bold text-amber-900 pt-1 border-t border-amber-200">รวมสะสมทุกจุด: <span id="itemHistoryTotal"></span></p>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-stone-700 mb-1">📍 สถานที่ที่นับ (ไม่บังคับ)</label>
+                <select id="fillLocationSelect" onchange="onLocationChange()" class="w-full border rounded p-2 text-sm">
+                    <option value="">-- ไม่ระบุสถานที่ --</option>
+                </select>
+                <p class="text-[10px] text-stone-400 mt-1">ระบบจำสถานที่ล่าสุดไว้ให้รายการถัดไปอัตโนมัติ</p>
+            </div>
+            
+            <div class="bg-stone-50 p-3 rounded border space-y-1">
+                <label class="block text-xs font-bold text-stone-700">1. Count by Unit (btl/can)</label>
+                <input type="text" id="qtyUnitInput" readonly onclick="openKeypad('qtyUnitInput', 'Count by Unit')" class="w-full border rounded p-2 font-bold text-center text-emerald-700 text-lg bg-white cursor-pointer" value="0">
+            </div>
+
+            <div class="bg-stone-50 p-3 rounded border space-y-1">
+                <label class="block text-xs font-bold text-stone-700">2. Count by Sub Unit (oz/gl) — กรอกทศนิยมได้</label>
+                <input type="text" id="qtySubUnitInput" readonly onclick="openKeypad('qtySubUnitInput', 'Count by Sub Unit')" class="w-full border rounded p-2 font-bold text-center text-amber-700 text-lg bg-white cursor-pointer" value="0">
+            </div>
+
+            <button onclick="saveCount()" class="w-full bg-emerald-600 text-white rounded font-bold py-3 text-sm shadow">✅ บันทึกยอดนับ (จุดนี้)</button>
+
+        </div>
+
+        <!-- Count History Panel -->
+        <button onclick="toggleHistoryPanel()" class="w-full bg-sky-600 text-white rounded font-bold py-2.5 text-sm shadow mt-4 flex items-center justify-center gap-2">📜 ประวัติการนับทั้งหมด <span id="historyBadge" class="bg-white/25 rounded-full px-2 text-xs hidden"></span></button>
+        <div id="historyPanel" class="card p-4 my-4 hidden border-2 border-sky-500 space-y-3">
+            <div class="flex justify-between items-center gap-2">
+                <h3 class="font-bold text-stone-700 text-sm">📜 ประวัติการนับ (ล่าสุดก่อน)</h3>
+                <select id="historyLocationSelect" onchange="renderCountHistory()" class="text-xs border rounded p-1.5 bg-white">
+                    <option value="">ทุก outlet</option>
+                </select>
+            </div>
+            <div id="historyEditBox" class="hidden bg-amber-50 border border-amber-300 rounded p-3 space-y-2"></div>
+            <div id="historyStats" class="text-xs text-stone-500"></div>
+            <div id="historyList" class="space-y-1.5 max-h-96 overflow-y-auto"></div>
+        </div>
+
+        <!-- Location Summary -->
+        <div class="card p-4 mt-4 border-2 border-blue-200">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="font-bold text-stone-700 text-sm">📍 ยอดรวมแยกตามสถานที่</h3>
+                <button onclick="renderLocationSummary()" class="text-xs bg-stone-100 px-2 py-1 rounded border">🔄 รีเฟรช</button>
+            </div>
+            <div id="locationSummaryList" class="space-y-2 text-xs">
+                ยังไม่มีข้อมูลการนับแยกตามสถานที่
+            </div>
+        </div>
+
+        <!-- Location Detail -->
+        <div class="card p-4 mt-4 border-2 border-emerald-200">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="font-bold text-stone-700 text-sm">🔎 รายละเอียด Stock ตามสถานที่</h3>
+                <button onclick="renderLocationDetail()" class="text-xs bg-stone-100 px-2 py-1 rounded border">🔄 รีเฟรช</button>
+            </div>
+            <select id="locationDetailSelect" onchange="renderLocationDetail()" class="w-full border rounded p-2 text-sm mb-3">
+                <option value="">-- เลือกสถานที่ --</option>
+            </select>
+            <div id="locationDetailStats" class="grid grid-cols-3 gap-2 mb-3 hidden"></div>
+            <div id="locationDetailTable" class="overflow-x-auto text-xs">
+                <div class="text-stone-500 p-2 bg-stone-50 rounded">เลือกสถานที่เพื่อดูรายการสินค้า</div>
+            </div>
+        </div>
+
+        <!-- Summary & Export -->
+        <div class="card p-4 mt-4">
+            <h3 class="font-bold text-stone-700 text-sm mb-2">📊 สรุปการนับ (<span id="totalCountedItems">0</span> รายการ)</h3>
+            <div id="progressText" class="text-xs text-stone-500 mb-2">ความคืบหน้า: 0%</div>
+            <div id="summaryList" class="text-xs text-stone-600 max-h-48 overflow-y-auto mb-3 border p-2 rounded bg-stone-50 space-y-1">
+                ยังไม่มีการบันทึกข้อมูล
+            </div>
+            <button onclick="exportExcel()" class="w-full bg-blue-700 text-white py-3 rounded-lg font-bold text-sm shadow">📥 Export เป็น Excel</button>
+        </div>
+    </div>
+
+    <!-- ================= MODAL KEYPAD (POPUP 0-9 + ทศนิยม) ================= -->
+    <div id="keypadModal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl w-full max-w-xs p-4 shadow-2xl border border-stone-200">
+            <h3 id="keypadTitle" class="text-center font-bold text-stone-800 text-sm mb-2">กรอกตัวเลข</h3>
+            <div id="keypadDisplay" class="bg-stone-100 border-2 border-amber-600 text-amber-900 font-bold text-2xl text-center py-3 rounded-xl mb-3">0</div>
+            
+            <div class="grid grid-cols-3 gap-2 mb-3">
+                <button onclick="pressKey('1')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">1</button>
+                <button onclick="pressKey('2')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">2</button>
+                <button onclick="pressKey('3')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">3</button>
+                <button onclick="pressKey('4')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">4</button>
+                <button onclick="pressKey('5')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">5</button>
+                <button onclick="pressKey('6')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">6</button>
+                <button onclick="pressKey('7')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">7</button>
+                <button onclick="pressKey('8')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">8</button>
+                <button onclick="pressKey('9')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">9</button>
+            </div>
+
+            <div class="grid grid-cols-4 gap-2 mb-3">
+                <button onclick="pressKey('C')" class="bg-rose-100 hover:bg-rose-200 text-rose-700 py-3 rounded-xl font-bold text-sm shadow-sm border">ล้าง (C)</button>
+                <button onclick="pressKey('0')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">0</button>
+                <button onclick="pressKey('.')" class="bg-stone-100 hover:bg-amber-100 py-3 rounded-xl font-bold text-lg text-stone-800 shadow-sm border">.</button>
+                <button onclick="pressKey('DEL')" class="bg-amber-100 hover:bg-amber-200 text-amber-900 py-3 rounded-xl font-bold text-sm shadow-sm border">⬅️ ลบ</button>
+            </div>
+            
+            <div class="flex gap-2">
+                <button onclick="closeKeypad(false)" class="flex-1 bg-stone-300 hover:bg-stone-400 text-stone-700 py-2 rounded-xl font-bold text-sm">ยกเลิก</button>
+                <button onclick="closeKeypad(true)" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-xl font-bold text-sm shadow">ตกลง</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let poData = [];
+        let countedUnitData = {};    
+        let countedSubUnitData = {}; 
+        let countHistory = {};       // { idx: [{unit, subUnit, location, time}, ...] } — ประวัติการนับแยกตามจุด
+        let customItems = []; 
+        let barcodeMap = {};  
+        let currentItem = null;
+        let html5QrCode = null;
+        let scannerActive = false;            // flag สถานะกล้องจริง (isScanning ของ lib คืน Promise ใช้เทียบ truthy ไม่ได้)
+        let lastScan = { code: '', time: 0 }; // กันรหัสเดิมจากกล้องยิงซ้ำถี่เกินไป
+        let audioCtx = null;                  // ใช้เล่นเสียงปี๊บ
+
+        // ตัวแปรควบคุม Keypad Popup แบบ Concatenate
+        let activeInputId = null;
+        let currentTypedValue = "0";
+
+        // ================= PERSISTENCE / SESSION =================
+        const STORAGE_KEY = 'navera_inventory_v2';
+
+        let inventorySession = {
+            name: '',
+            startedAt: '',
+            locations: ['Bar 1', 'Bar 2', 'Main Store', 'Kitchen', 'Mini Bar'],
+            lastLocation: '',      // sticky location: สถานที่ล่าสุดที่เลือก ใช้กับรายการถัดไป
+            hasUnexported: false,  // มียอดนับที่ยังไม่ได้ Export ลงไฟล์
+        };
+
+        function saveState() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    poData, countedUnitData, countedSubUnitData, countHistory,
+                    customItems, inventorySession
+                }));
+                updateSessionUI();
+            } catch (err) {
+                console.error('ไม่สามารถบันทึกข้อมูลในเครื่องได้', err);
+            }
+        }
+
+        function loadState() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return;
+                const state = JSON.parse(raw);
+                poData = Array.isArray(state.poData) ? state.poData : [];
+                countedUnitData = state.countedUnitData || {};
+                countedSubUnitData = state.countedSubUnitData || {};
+                countHistory = state.countHistory || {};
+                customItems = Array.isArray(state.customItems) ? state.customItems : [];
+                inventorySession = state.inventorySession || inventorySession;
+                rebuildBarcodeMap();
+                updateSessionUI();
+                updateSummaryUI();
+            } catch (err) {
+                console.error('ไม่สามารถโหลดข้อมูลที่บันทึกไว้ได้', err);
+            }
+        }
+
+        function rebuildBarcodeMap() {
+            barcodeMap = {};
+            poData.forEach((item, idx) => {
+                const barcodeVal = item.Barcode || item.BARCODE || item.barcode;
+                if (barcodeVal !== undefined && barcodeVal !== null && String(barcodeVal).trim()) {
+                    barcodeMap[String(barcodeVal).trim()] = idx;
+                }
+            });
+        }
+
+        function updateSessionUI() {
+            const el = document.getElementById('sessionStatus');
+            if (!el) return;
+            let text = inventorySession.name
+                ? `รอบนับ: ${inventorySession.name} • ${poData.length} รายการ`
+                : 'ยังไม่ได้สร้างรอบนับ';
+            if (inventorySession.hasUnexported && hasCountData()) text += ' • ⚠️ ยังไม่ได้ Export';
+            el.textContent = text;
+        }
+
+        function createNewSession() {
+            const name = prompt('ตั้งชื่อรอบนับ เช่น Stock Count 16-08-2026');
+            if (!name || !name.trim()) return;
+            if (poData.length || customItems.length || Object.keys(countHistory).length) {
+                if (!confirm('เริ่มรอบใหม่จะล้างข้อมูลการนับปัจจุบัน ต้องการดำเนินการต่อหรือไม่?')) return;
+                if (!confirmDiscardUnexported('เริ่มรอบนับใหม่')) return;
+            }
+            poData = [];
+            countedUnitData = {};
+            countedSubUnitData = {};
+            countHistory = {};
+            customItems = [];
+            barcodeMap = {};
+            inventorySession = {
+                name: name.trim(),
+                startedAt: new Date().toISOString(),
+                locations: inventorySession.locations || ['Bar 1', 'Bar 2', 'Main Store', 'Kitchen', 'Mini Bar'],
+                lastLocation: '',
+                hasUnexported: false
+            };
+            document.getElementById('inputExcel').value = '';
+            document.getElementById('poStatus').textContent = 'ยังไม่ได้โหลดไฟล์';
+            document.getElementById('liveResultList').innerHTML = '';
+            document.getElementById('liveSearchInput').value = '';
+            updateSummaryUI();
+            saveState();
+            toast('สร้างรอบนับใหม่แล้ว', 'success');
+        }
+
+        function clearSession() {
+            if (!confirm('ล้างข้อมูลทั้งหมดของรอบนี้หรือไม่?')) return;
+            if (!confirmDiscardUnexported('ล้างข้อมูลทั้งหมด')) return;
+            localStorage.removeItem(STORAGE_KEY);
+            location.reload();
+        }
+
+        function getLocations() {
+            return inventorySession.locations || [];
+        }
+
+        function addLocation() {
+            const name = prompt('เพิ่มชื่อสถานที่');
+            if (!name || !name.trim()) return;
+            const clean = name.trim();
+            if (!getLocations().includes(clean)) getLocations().push(clean);
+            refreshLocationOptions();
+            saveState();
+        }
+
+        function refreshLocationOptions() {
+            const select = document.getElementById('fillLocationSelect');
+            if (!select) return;
+            const current = select.value;
+            select.innerHTML = '<option value="">-- ไม่ระบุสถานที่ --</option>' +
+                getLocations().map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('') +
+                '<option value="__custom__">➕ เพิ่มสถานที่...</option>';
+            if (getLocations().includes(current)) select.value = current;
+        }
+
+        function onLocationChange() {
+            const select = document.getElementById('fillLocationSelect');
+            if (select.value === '__custom__') {
+                select.value = '';
+                addLocation();
+                return;
+            }
+            // sticky location: จำสถานที่ที่เลือกไว้ใช้กับรายการถัดไปอัตโนมัติ
+            inventorySession.lastLocation = select.value;
+            saveState();
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, c => ({
+                '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
+            }[c]));
+        }
+
+        // ================= HELPERS: กันข้อมูลหาย / จัด format / TOAST / เสียง =================
+        function hasCountData() {
+            return Object.keys(countHistory).length > 0 || customItems.length > 0;
+        }
+
+        function markUnexported() {
+            inventorySession.hasUnexported = true;
+        }
+
+        // เตือนก่อนทำลายข้อมูล ถ้ามียอดนับที่ยังไม่ได้ Export
+        function confirmDiscardUnexported(actionText) {
+            if (!inventorySession.hasUnexported || !hasCountData()) return true;
+            return confirm(`⚠️ มียอดนับที่ยังไม่ได้ Export ลงไฟล์ Excel\nหาก${actionText} ข้อมูลเหล่านี้จะหายถาวร\n\nแนะนำให้กด "📥 Export เป็น Excel" ก่อน\n\nกด OK = ดำเนินการต่อโดยไม่ Export / กด Cancel = ยกเลิก`);
+        }
+
+        // จัดจำนวนไม่ให้มีทศนิยมยาวจากการบวกเศษสะสม เช่น 12.300000000000001
+        function formatQty(n) {
+            if (!Number.isFinite(n)) return n;
+            return Number.isInteger(n) ? n : parseFloat(n.toFixed(3));
+        }
+
+        function toast(message, type = 'info', duration = 2600) {
+            const box = document.getElementById('toastBox');
+            if (!box) { alert(message); return; }
+            const colors = {
+                success: 'bg-emerald-600 text-white',
+                error: 'bg-rose-600 text-white',
+                warn: 'bg-amber-600 text-white',
+                info: 'bg-stone-800 text-white'
+            };
+            const el = document.createElement('div');
+            el.className = `toast-item pointer-events-auto max-w-md w-full ${colors[type] || colors.info} px-4 py-2.5 rounded-xl shadow-lg text-sm font-bold text-center`;
+            el.textContent = message;
+            box.appendChild(el);
+            setTimeout(() => {
+                el.style.transition = 'opacity .3s';
+                el.style.opacity = '0';
+                setTimeout(() => el.remove(), 320);
+            }, duration);
+        }
+
+        function beep(freq, durationMs, volume = 0.18) {
+            try {
+                audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.type = 'sine';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + durationMs / 1000);
+                osc.start();
+                osc.stop(audioCtx.currentTime + durationMs / 1000 + 0.02);
+            } catch (err) { /* เครื่องไม่รองรับเสียง ข้ามไป */ }
+        }
+
+        // เสียง "ติ้ด" ดัง 2 จังหวะ เมื่อสแกนเจอรายการ
+        function loudScanBeep() {
+            beep(1500, 100, 0.5);
+            setTimeout(() => beep(1500, 100, 0.5), 140);
+        }
+
+        // เสียงแตรสำเร็จ + เสียงพูดว่า "บันทึกแล้ว" เมื่อกดบันทึก
+        function speakSaved() {
+            beep(880, 120, 0.5);
+            setTimeout(() => beep(1174, 180, 0.5), 150);
+            setTimeout(() => {
+                try {
+                    if ('speechSynthesis' in window && window.speechSynthesis) {
+                        const u = new SpeechSynthesisUtterance('บันทึกแล้ว');
+                        u.lang = 'th-TH';
+                        u.volume = 1;
+                        window.speechSynthesis.speak(u);
+                    }
+                } catch (err) { /* เครื่องไม่มีเสียงพูด ข้ามไป */ }
+            }, 420);
+        }
+
+        // เสียง + สั่นเครื่อง เมื่อสแกนสำเร็จ ("ติ้ดติ้ด" ดัง) หรือไม่พบรายการ (เสียงต่ำยาว)
+        function scanFeedback(ok) {
+            if (ok) {
+                loudScanBeep();
+                if (navigator.vibrate) navigator.vibrate(80);
+            } else {
+                beep(400, 250, 0.5);
+                if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
+            }
+        }
+
+        // ปลดล็อกเสียงบนมือถือ: ต้องแตะหน้าจอครั้งแรกก่อน เสียงถึงจะเล่นได้เต็มระดับ
+        ['pointerdown', 'touchstart', 'keydown'].forEach(evt => {
+            document.addEventListener(evt, () => {
+                try {
+                    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                    if (audioCtx.state === 'suspended') audioCtx.resume();
+                } catch (err) { /* ข้าม */ }
+            }, { once: true });
+        });
+
+        function getConvertedQty(unitQty, subQty, subUnitItem) {
+            const conversion = parseFloat(subUnitItem);
+            if (!Number.isFinite(conversion) || conversion <= 0) return null;
+            return (unitQty * conversion + subQty) / conversion;
+        }
+
+        function validateCount(unitQty, subQty) {
+            if (!Number.isFinite(unitQty) || unitQty < 0 || !Number.isFinite(subQty) || subQty < 0) {
+                alert('กรุณากรอกจำนวนเป็นตัวเลขตั้งแต่ 0 ขึ้นไป (Sub Unit กรอกทศนิยมได้ เช่น 12.5)');
+                return false;
+            }
+            if (unitQty === 0 && subQty === 0) {
+                return confirm('จำนวนที่นับเป็น 0 ทั้งคู่ ต้องการบันทึกหรือไม่?');
+            }
+            return true;
+        }
+
+
+        window.addEventListener('DOMContentLoaded', () => { loadState(); refreshLocationOptions(); renderLocationSummary(); refreshLocationDetailOptions(); renderLocationDetail(); });
+
+        function openKeypad(inputId, labelTitle) {
+            activeInputId = inputId;
+            document.getElementById('keypadTitle').textContent = "กรอก: " + labelTitle;
+            const existingVal = document.getElementById(inputId).value;
+            currentTypedValue = (existingVal === "" || existingVal === "0") ? "0" : existingVal;
+            document.getElementById('keypadDisplay').textContent = currentTypedValue;
+            document.getElementById('keypadModal').classList.remove('hidden');
+        }
+
+        // แสดงประวัติการนับก่อนหน้าของสินค้ารายการนี้ พร้อมปุ่ม 🗑️ ลบรายการที่คีย์ผิดทีละแถว
+        function renderItemHistory(idx) {
+            const hist = countHistory[idx] || [];
+            const box = document.getElementById('itemHistoryBox');
+            const list = document.getElementById('itemHistoryList');
+            if (hist.length === 0) {
+                box.classList.add('hidden');
+                list.innerHTML = '';
+                return;
+            }
+            box.classList.remove('hidden');
+            list.innerHTML = hist.map((h, i) =>
+                `<div class="flex justify-between items-center gap-2">
+                    <div>${i + 1}. ${h.location ? '[' + escapeHtml(h.location) + '] ' : ''}Unit ${h.unit} | Sub ${h.subUnit} <span class="text-stone-400">(${escapeHtml(h.time)})</span></div>
+                    <button onclick="deleteCountEntry(${idx}, ${i})" class="shrink-0 text-rose-600 hover:bg-rose-100 rounded px-1.5 py-0.5 font-bold" title="ลบรายการนี้ (กรณีคีย์ผิด)">🗑️</button>
+                </div>`
+            ).join('');
+            const totalUnit = hist.reduce((s, h) => s + h.unit, 0);
+            const totalSub = hist.reduce((s, h) => s + h.subUnit, 0);
+            document.getElementById('itemHistoryTotal').textContent = `Unit ${formatQty(totalUnit)} | Sub ${formatQty(totalSub)}`;
+        }
+
+        // ลบรายการนับที่คีย์ผิดทีละแถว แล้วคำนวณยอดรวมสะสมใหม่
+        function deleteCountEntry(idx, entryIndex) {
+            const hist = countHistory[idx];
+            if (!hist || !hist[entryIndex]) return;
+            const entry = hist[entryIndex];
+            const item = poData[idx];
+            const label = item ? (item.Description || item.Code) : ('รายการ #' + idx);
+            if (!confirm(`ลบรายการนับนี้?\n\n${label}\n${entry.location ? '[' + entry.location + '] ' : ''}Unit ${entry.unit} | Sub ${entry.subUnit} (${entry.time})`)) return;
+
+            hist.splice(entryIndex, 1);
+            if (hist.length === 0) {
+                delete countHistory[idx];
+                delete countedUnitData[idx];
+                delete countedSubUnitData[idx];
+            } else {
+                countedUnitData[idx] = formatQty(hist.reduce((s, h) => s + h.unit, 0));
+                countedSubUnitData[idx] = formatQty(hist.reduce((s, h) => s + h.subUnit, 0));
+            }
+            markUnexported();
+            saveState();
+            renderItemHistory(idx);
+            updateSummaryUI();
+            renderCountHistory();
+            toast('🗑️ ลบรายการแล้ว ยอดรวมถูกคำนวณใหม่', 'success');
+        }
+
+        // ==================== ประวัติการนับทั้งหมด (Count History Panel) ====================
+        let historyEditTarget = null;
+
+        function toggleHistoryPanel() {
+            const panel = document.getElementById('historyPanel');
+            panel.classList.toggle('hidden');
+            if (!panel.classList.contains('hidden')) renderCountHistory();
+        }
+
+        function refreshHistoryLocationOptions() {
+            const select = document.getElementById('historyLocationSelect');
+            const current = select.value;
+            const locations = new Set();
+            Object.values(countHistory).forEach(hist => (hist || []).forEach(h => locations.add(h.location || 'ไม่ระบุสถานที่')));
+            select.innerHTML = '<option value="">ทุก outlet</option>' +
+                Array.from(locations).sort((a, b) => a.localeCompare(b, 'th'))
+                    .map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
+            if (locations.has(current)) select.value = current;
+        }
+
+        function getHistoryRows() {
+            const rows = [];
+            poData.forEach((item, idx) => {
+                (countHistory[idx] || []).forEach((h, entryIndex) => rows.push({ idx, entryIndex, item, h }));
+            });
+            // เรียงรายการที่นับล่าสุดขึ้นก่อน (รายการเก่าที่ไม่มี timestamp จะอยู่ท้ายสุด)
+            return rows.sort((a, b) => (b.h.ts || 0) - (a.h.ts || 0));
+        }
+
+        function renderCountHistory() {
+            const listDiv = document.getElementById('historyList');
+            if (!listDiv) return;
+            refreshHistoryLocationOptions();
+
+            const badge = document.getElementById('historyBadge');
+            const all = getHistoryRows();
+            if (badge) {
+                badge.textContent = all.length;
+                badge.classList.toggle('hidden', all.length === 0);
+            }
+
+            const filter = document.getElementById('historyLocationSelect').value;
+            const rows = filter ? all.filter(r => (r.h.location || 'ไม่ระบุสถานที่') === filter) : all;
+
+            const statsDiv = document.getElementById('historyStats');
+            if (statsDiv) statsDiv.textContent = rows.length
+                ? `พบ ${rows.length} รายการนับ` + (filter ? ` (outlet: ${filter})` : '')
+                : '';
+
+            if (!rows.length) {
+                listDiv.innerHTML = `<p class="text-xs text-stone-400 text-center py-4">${all.length ? 'ไม่พบรายการใน outlet นี้' : 'ยังไม่มีประวัติการนับ'}</p>`;
+                return;
+            }
+
+            listDiv.innerHTML = rows.map(r => {
+                const item = r.item || {};
+                const editing = historyEditTarget && historyEditTarget.idx === r.idx && historyEditTarget.entryIndex === r.entryIndex;
+                return `
+                    <div class="border rounded p-2 flex items-center gap-2 ${editing ? 'bg-amber-50 border-amber-400' : 'bg-white border-stone-200'}">
+                        <div class="flex-1 min-w-0">
+                            <div class="font-bold text-stone-800 truncate text-xs">${escapeHtml(item.Description || item.Code || ('#' + r.idx))}${r.h.edited ? ' <span class="text-amber-600">✏️</span>' : ''}</div>
+                            <div class="text-[11px] text-stone-500">📍 ${escapeHtml(r.h.location || 'ไม่ระบุสถานที่')} • 🕒 ${escapeHtml(r.h.time || '-')} • Unit ${formatQty(r.h.unit)} | Sub ${formatQty(r.h.subUnit)}</div>
+                        </div>
+                        <button onclick="editHistoryEntry(${r.idx}, ${r.entryIndex})" class="bg-amber-100 text-amber-800 border border-amber-300 rounded px-2 py-1 text-xs font-bold shrink-0">✏️</button>
+                        <button onclick="deleteHistoryEntry(${r.idx}, ${r.entryIndex})" class="bg-rose-100 text-rose-700 border border-rose-300 rounded px-2 py-1 text-xs font-bold shrink-0">🗑️</button>
+                    </div>`;
+            }).join('');
+        }
+
+        function editHistoryEntry(idx, entryIndex) {
+            const entry = (countHistory[idx] || [])[entryIndex];
+            const item = poData[idx];
+            if (!entry || !item) return;
+            historyEditTarget = { idx, entryIndex };
+
+            const box = document.getElementById('historyEditBox');
+            box.classList.remove('hidden');
+            box.innerHTML = `
+                <div class="font-bold text-amber-900 text-xs">✏️ แก้ไขยอดนับ: ${escapeHtml(item.Description || item.Code || '')}
+                    <span class="text-stone-400 font-normal">[${escapeHtml(entry.location || 'ไม่ระบุสถานที่')} • ${escapeHtml(entry.time || '-')}]</span>
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                    <div>
+                        <label class="block text-[10px] font-bold text-stone-500 mb-0.5">Unit</label>
+                        <input type="number" id="histEditUnit" value="${Number(entry.unit) || 0}" min="0" step="any" class="w-full border rounded p-1.5 text-center font-bold text-emerald-700">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-stone-500 mb-0.5">Sub Unit</label>
+                        <input type="number" id="histEditSubUnit" value="${Number(entry.subUnit) || 0}" min="0" step="any" class="w-full border rounded p-1.5 text-center font-bold text-amber-700">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-stone-500 mb-0.5">Outlet</label>
+                        <select id="histEditLocation" class="w-full border rounded p-1.5 text-xs">
+                            ${getLocations().map(l => `<option value="${escapeHtml(l)}" ${l === (entry.location || '') ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('')}
+                            ${entry.location && !getLocations().includes(entry.location) ? `<option value="${escapeHtml(entry.location)}" selected>${escapeHtml(entry.location)}</option>` : ''}
+                        </select>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="saveHistoryEdit()" class="flex-1 bg-emerald-600 text-white rounded py-1.5 text-xs font-bold">💾 บันทึกการแก้ไข</button>
+                    <button onclick="cancelHistoryEdit()" class="bg-stone-200 rounded px-3 py-1.5 text-xs font-bold">ยกเลิก</button>
+                </div>`;
+            renderCountHistory();
+        }
+
+        function cancelHistoryEdit() {
+            historyEditTarget = null;
+            const box = document.getElementById('historyEditBox');
+            if (box) {
+                box.classList.add('hidden');
+                box.innerHTML = '';
+            }
+            renderCountHistory();
+        }
+
+        function refreshItemAggregates(idx) {
+            const hist = countHistory[idx] || [];
+            if (hist.length === 0) {
+                delete countHistory[idx];
+                delete countedUnitData[idx];
+                delete countedSubUnitData[idx];
+            } else {
+                countedUnitData[idx] = formatQty(hist.reduce((s, h) => s + h.unit, 0));
+                countedSubUnitData[idx] = formatQty(hist.reduce((s, h) => s + h.subUnit, 0));
+            }
+        }
+
+        function saveHistoryEdit() {
+            if (!historyEditTarget) return;
+            const { idx, entryIndex } = historyEditTarget;
+            const hist = countHistory[idx] || [];
+            const entry = hist[entryIndex];
+            if (!entry) { cancelHistoryEdit(); return; }
+
+            const unitQty = parseFloat(document.getElementById('histEditUnit').value) || 0;
+            const subUnitQty = parseFloat(document.getElementById('histEditSubUnit').value) || 0;
+            const newLocation = (document.getElementById('histEditLocation').value || '').trim();
+
+            if (!validateCount(unitQty, subUnitQty)) return;
+
+            const item = poData[idx] || {};
+            const name = item.Description || item.Code || ('#' + idx);
+            const oldLabel = `[${entry.location || 'ไม่ระบุสถานที่'}] Unit ${formatQty(entry.unit)} | Sub ${formatQty(entry.subUnit)}`;
+            const newLabel = `[${newLocation || 'ไม่ระบุสถานที่'}] Unit ${formatQty(unitQty)} | Sub ${formatQty(subUnitQty)}`;
+
+            if (!confirm(`⚠️ ยืนยันการแก้ไขรายการนับ?\n\n${name}\n\nเดิม: ${oldLabel}\nใหม่: ${newLabel}\n\nกด OK เพื่อบันทึกการแก้ไข`)) return;
+
+            entry.unit = unitQty;
+            entry.subUnit = subUnitQty;
+            entry.location = newLocation;
+            entry.edited = true;
+            entry.ts = Date.now();
+
+            refreshItemAggregates(idx);
+            historyEditTarget = null;
+            const box = document.getElementById('historyEditBox');
+            box.classList.add('hidden');
+            box.innerHTML = '';
+            markUnexported();
+            saveState();
+            updateSummaryUI();
+            toast(`✏️ แก้ไขยอดนับแล้ว: ${name}\n${newLabel}`, 'success');
+        }
+
+        function deleteHistoryEntry(idx, entryIndex) {
+            const hist = countHistory[idx] || [];
+            const entry = hist[entryIndex];
+            if (!entry) return;
+            const item = poData[idx] || {};
+            const name = item.Description || item.Code || ('#' + idx);
+            if (!confirm(`⚠️ ยืนยันการลบรายการนับ?\n\n${name}\n[${entry.location || 'ไม่ระบุสถานที่'}] Unit ${formatQty(entry.unit)} | Sub ${formatQty(entry.subUnit)} (${entry.time || '-'})\n\nลบแล้วไม่สามารถย้อนกลับได้`)) return;
+
+            hist.splice(entryIndex, 1);
+            refreshItemAggregates(idx);
+            markUnexported();
+            saveState();
+            updateSummaryUI();
+            toast(`🗑️ ลบรายการนับแล้ว: ${name}`, 'success');
+        }
+
+        // เปิด Count Panel ให้สินค้ารายการหนึ่ง (ใช้ทั้งจากผลค้นหาและจากการสแกนบาร์โค้ด)
+        function openItemPanel(idx, barcodeDisplay) {
+            const item = poData[idx];
+            currentItem = { type: 'po', index: idx, data: item };
+            document.getElementById('itemName').textContent = item.Description || item.Code;
+            document.getElementById('currentBarcode').textContent = barcodeDisplay || item.Barcode || '(ไม่มีบาร์โค้ด)';
+            const locSelect = document.getElementById('fillLocationSelect');
+            // sticky location: ใช้สถานที่ล่าสุดที่เลือกไว้ ไม่ต้องเลือกใหม่ทุกครั้ง
+            locSelect.value = (inventorySession.lastLocation && getLocations().includes(inventorySession.lastLocation))
+                ? inventorySession.lastLocation
+                : '';
+            // เริ่มที่ 0 เสมอ เพราะถือเป็นยอดที่นับ ณ จุดนี้ (จุดใหม่) ไม่ใช่การแก้ไขยอดเดิม
+            document.getElementById('qtyUnitInput').value = "0";
+            document.getElementById('qtySubUnitInput').value = "0";
+            renderItemHistory(idx);
+            document.getElementById('countPanel').classList.remove('hidden');
+
+            if (countHistory[idx] && countHistory[idx].length > 0) {
+                const totalUnit = countHistory[idx].reduce((s, h) => s + h.unit, 0);
+                const totalSub = countHistory[idx].reduce((s, h) => s + h.subUnit, 0);
+                toast(`ℹ️ สินค้านี้เคยนับแล้ว ${countHistory[idx].length} จุด (รวม Unit ${formatQty(totalUnit)} | Sub ${formatQty(totalSub)})\nยอดที่กรอก ณ จุดนี้จะถูกบวกสะสมให้อัตโนมัติ`, 'warn', 3500);
+            }
+        }
+
+        function pressKey(char) {
+            if (char === 'C') {
+                currentTypedValue = "0";
+            } else if (char === 'DEL') {
+                if (currentTypedValue.length > 1) {
+                    currentTypedValue = currentTypedValue.slice(0, -1);
+                } else {
+                    currentTypedValue = "0";
+                }
+            } else {
+                // Concatenate ตัวเลขต่อท้ายแบบเครื่องคิดเลข (ทศนิยมได้ 1 จุด)
+                if (char === '.' && currentTypedValue.includes('.')) return;
+                if (currentTypedValue === "0") {
+                    currentTypedValue = (char === '.') ? "0." : char;
+                } else {
+                    currentTypedValue += char;
+                }
+            }
+            document.getElementById('keypadDisplay').textContent = currentTypedValue;
+        }
+
+        function closeKeypad(isConfirm) {
+            if (isConfirm && activeInputId) {
+                document.getElementById(activeInputId).value = currentTypedValue;
+            }
+            document.getElementById('keypadModal').classList.add('hidden');
+            activeInputId = null;
+        }
+
+        function switchTab(mode) {
+            stopScanner();
+            if (mode === 'po') {
+                document.getElementById('sectionPo').classList.remove('hidden');
+                document.getElementById('sectionManual').classList.add('hidden');
+                document.getElementById('tabPoBtn').className = "flex-1 py-2 rounded-lg bg-white text-amber-900 shadow";
+                document.getElementById('tabManualBtn').className = "flex-1 py-2 rounded-lg text-stone-600";
+            } else {
+                document.getElementById('sectionPo').classList.add('hidden');
+                document.getElementById('sectionManual').classList.remove('hidden');
+                document.getElementById('tabPoBtn').className = "flex-1 py-2 rounded-lg text-stone-600";
+                document.getElementById('tabManualBtn').className = "flex-1 py-2 rounded-lg bg-white text-amber-900 shadow";
+            }
+        }
+
+        document.getElementById('inputExcel').addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // กันลืม: ถ้ามียอดนับค้างอยู่ การอัปโหลดไฟล์ใหม่จะเริ่มนับใหม่จากศูนย์ ต้องยืนยันก่อนเสมอ
+            if (poData.length && hasCountData()) {
+                const counted = Object.keys(countHistory).length + customItems.length;
+                if (!confirm(`คุณมียอดนับค้างอยู่ ${counted} รายการ\nการอัปโหลดไฟล์ใหม่จะ "ลบยอดที่นับไว้ทั้งหมด" และเริ่มนับใหม่จากศูนย์\n\nถ้าต้องการเก็บยอดเดิม ให้กด Cancel แล้วกด Export ออกมาก่อน\n\nต้องการดำเนินการต่อหรือไม่?`)) {
+                    e.target.value = '';
+                    return;
+                }
+            }
+
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const ws = workbook.Sheets[workbook.SheetNames[0]];
+                    const rawJson = XLSX.utils.sheet_to_json(ws);
+
+                    poData = [];
+                    countedUnitData = {};
+                    countedSubUnitData = {};
+                    countHistory = {};
+                    barcodeMap = {};
+                    inventorySession.hasUnexported = false;
+
+                    const barcodeSeen = {};              // ไว้ตรวจบาร์โค้ดซ้ำในไฟล์
+                    const duplicateBarcodes = new Set();
+
+                    rawJson.forEach((item, idx) => {
+                        let newItem = {_index: idx};
+                        for (let key in item) {
+                            let cleanKey = key.replace(/\s+/g, ' ').trim();
+                            newItem[cleanKey] = item[key];
+                        }
+                        poData.push(newItem);
+
+                        const barcodeVal = newItem.Barcode || newItem.BARCODE || newItem.barcode;
+                        if (barcodeVal !== undefined && barcodeVal !== null && String(barcodeVal).trim()) {
+                            const code = String(barcodeVal).trim();
+                            if (barcodeSeen[code] !== undefined) {
+                                duplicateBarcodes.add(code);
+                            } else {
+                                barcodeSeen[code] = idx;
+                            }
+                            barcodeMap[code] = idx;
+                        }
+                    });
+
+                    document.getElementById('poStatus').textContent = `โหลดสำเร็จ: ${poData.length} รายการ` +
+                        (duplicateBarcodes.size ? ` (⚠️ บาร์โค้ดซ้ำ ${duplicateBarcodes.size} รหัส)` : '');
+                    if (!inventorySession.name) inventorySession.name = file.name.replace(/\.[^.]+$/, '');
+                    inventorySession.startedAt = inventorySession.startedAt || new Date().toISOString();
+                    saveState();
+
+                    if (duplicateBarcodes.size) {
+                        const sample = Array.from(duplicateBarcodes).slice(0, 10).join(', ');
+                        alert(`⚠️ พบบาร์โค้ดซ้ำกันในไฟล์ ${duplicateBarcodes.size} รหัส:\n${sample}\n\nเมื่อสแกนบาร์โค้ดที่ซ้ำ ระบบจะเปิดรายการแถวสุดท้ายเท่านั้น\nกรุณาตรวจไฟล์ Excel และแก้บาร์โค้ดให้ไม่ซ้ำกัน`);
+                    }
+                } catch (err) {
+                    document.getElementById('poStatus').textContent = "เกิดข้อผิดพลาดในการอ่านไฟล์";
+                    console.error(err);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        function onLiveSearchInput() {
+            if (poData.length === 0) return;
+            const keyword = document.getElementById('liveSearchInput').value.toLowerCase();
+            const resultDiv = document.getElementById('liveResultList');
+            resultDiv.innerHTML = '';
+
+            if (!keyword) return;
+
+            const matches = poData.filter(item => {
+                const text = `${item.Code || ''} ${item.Description || ''} ${item.Category || ''}`.toLowerCase();
+                return text.includes(keyword);
+            });
+
+            if (matches.length === 0) {
+                resultDiv.innerHTML = '<p class="text-xs text-rose-500 p-1">ไม่พบสินค้าที่ค้นหา</p>';
+                return;
+            }
+
+            matches.slice(0, 30).forEach(item => {
+                const btn = document.createElement('button');
+                btn.className = 'w-full text-left bg-stone-50 hover:bg-amber-100 p-2 rounded text-xs border border-stone-200 block';
+                btn.innerHTML = `<b>[${item.Category || '-'}]</b> ${item.Code || ''} - ${item.Description || ''}`;
+                btn.onclick = () => {
+                    document.getElementById('liveResultList').innerHTML = '';
+                    document.getElementById('liveSearchInput').value = '';
+                    openItemPanel(item._index, item.Barcode);
+                };
+                resultDiv.appendChild(btn);
+            });
+        }
+
+        function isContinuous(targetMode) {
+            const el = document.getElementById(targetMode === 'po' ? 'continuousScan' : 'continuousScanManual');
+            return el ? el.checked : false;
+        }
+
+        function startScanner(targetMode) {
+            stopScanner();
+            const elementId = targetMode === 'po' ? 'reader' : 'readerManual';
+            html5QrCode = new Html5Qrcode(elementId);
+            scannerActive = true;  // ตั้งก่อน start เผื่อผู้ใช้กดปิดขณะกล้องกำลังเริ่ม
+
+            html5QrCode.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: 200 },
+                (decodedText) => handleDecoded(decodedText.trim(), targetMode),
+                (errorMessage) => {}
+            ).catch(err => {
+                scannerActive = false;
+                try { html5QrCode.clear(); } catch (e) {}
+                toast("ไม่สามารถเปิดกล้องได้: " + err, 'error', 4000);
+            });
+        }
+
+        // รับค่าจากกล้อง — โหมดสแกนต่อเนื่อง: กล้องค้างไว้ บันทึกรายการเสร็จสแกนตัวถัดไปได้เลย
+        function handleDecoded(code, targetMode) {
+            const now = Date.now();
+            if (code === lastScan.code && now - lastScan.time < 2500) return; // กันรหัสเดิมยิงซ้ำถี่ ๆ
+            lastScan = { code: code, time: now };
+
+            if (targetMode === 'po') {
+                if (barcodeMap[code] === undefined) {
+                    scanFeedback(false);
+                    toast(`❌ ไม่พบบาร์โค้ดนี้ในระบบ PO: ${code}`, 'error', 3000);
+                    return;
+                }
+                const idx = barcodeMap[code];
+
+                // แผงนับของรายการนี้เปิดอยู่แล้ว (กล้องยังเห็นบาร์โค้ดเดิม) ไม่ต้องทำซ้ำ
+                const panelOpen = currentItem && !document.getElementById('countPanel').classList.contains('hidden');
+                if (panelOpen && currentItem.index === idx) return;
+
+                // แผงอื่นเปิดค้างพร้อมยอดที่ยังไม่บันทึก ให้ยืนยันก่อนสลับรายการ
+                if (panelOpen) {
+                    const pendingUnit = parseFloat(document.getElementById('qtyUnitInput').value) || 0;
+                    const pendingSub = parseFloat(document.getElementById('qtySubUnitInput').value) || 0;
+                    if ((pendingUnit > 0 || pendingSub > 0) &&
+                        !confirm(`มียอดที่ยังไม่ได้บันทึกของ "${currentItem.data.Description || currentItem.data.Code}"\nสลับไปรายการใหม่โดยไม่บันทึกหรือไม่?`)) {
+                        lastScan = { code: '', time: 0 };
+                        return;
+                    }
+                }
+
+                scanFeedback(true);
+                if (!isContinuous(targetMode)) stopScanner();
+                openItemPanel(idx, code);
+            } else {
+                scanFeedback(true);
+                if (!isContinuous(targetMode)) stopScanner();
+                document.getElementById('customCode').value = code;
+                toast(`📋 กรอกบาร์โค้ดแล้ว: ${code}`, 'info', 1800);
+            }
+        }
+
+        function stopScanner() {
+            if (html5QrCode && scannerActive) {
+                scannerActive = false;
+                html5QrCode.stop().then(() => html5QrCode.clear()).catch(() => {});
+            }
+        }
+
+        function saveCount() {
+            const unitQty = parseFloat(document.getElementById('qtyUnitInput').value) || 0;
+            const subUnitQty = parseFloat(document.getElementById('qtySubUnitInput').value) || 0;
+            const location = document.getElementById('fillLocationSelect').value.trim();
+
+            if (!validateCount(unitQty, subUnitQty)) return;
+
+            if (currentItem && currentItem.type === 'po') {
+                const idx = currentItem.index;
+
+                if (!countHistory[idx]) countHistory[idx] = [];
+                countHistory[idx].push({
+                    unit: unitQty,
+                    subUnit: subUnitQty,
+                    location: location,
+                    ts: Date.now(),
+                    time: new Date().toLocaleString('th-TH', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                });
+
+                // รวมยอดสะสมจากทุกจุดที่เคยนับสินค้ารายการนี้
+                countedUnitData[idx] = formatQty(countHistory[idx].reduce((s, h) => s + h.unit, 0));
+                countedSubUnitData[idx] = formatQty(countHistory[idx].reduce((s, h) => s + h.subUnit, 0));
+
+                // sticky location: จำสถานที่นี้ไว้ให้รายการถัดไป
+                inventorySession.lastLocation = location;
+
+                markUnexported();
+                saveState();
+                speakSaved();
+                toast(`✅ บันทึก: ${currentItem.data.Description || currentItem.data.Code}\nรวมทุกจุด Unit ${formatQty(countedUnitData[idx])} | Sub ${formatQty(countedSubUnitData[idx])}` +
+                    (scannerActive ? '\n📷 สแกนรายการถัดไปได้เลย' : ''), 'success', 3000);
+            }
+            document.getElementById('countPanel').classList.add('hidden');
+            updateSummaryUI();
+        }
+
+        function addCustomItem() {
+            const code = document.getElementById('customCode').value.trim();
+            const desc = document.getElementById('customDesc').value.trim();
+            const unit = document.getElementById('customUnit').value.trim();
+            const subUnit = document.getElementById('customSubUnit').value.trim();
+            // แก้ไข: เดิมใช้ parseFloat(...) || 1 ทำให้กรอก 0 แล้วกลายเป็น 1
+            const rawConversion = parseFloat(document.getElementById('customSubUnitItem').value);
+            const subUnitItem = (Number.isFinite(rawConversion) && rawConversion > 0) ? rawConversion : 1;
+            const unitQty = parseFloat(document.getElementById('customQtyUnit').value) || 0;
+            const subUnitQty = parseFloat(document.getElementById('customQtySubUnit').value) || 0;
+
+            if (!code && !desc) {
+                alert("กรุณากรอกรหัสหรือชื่อสินค้า");
+                return;
+            }
+            customItems.push({
+                'Code': code,
+                'Description': desc,
+                'Unit': unit,
+                'Sub unit': subUnit,
+                'Sub unit item': subUnitItem,
+                'Counted Unit Qty': unitQty,
+                'Counted Sub Unit OZ/GL Qty': subUnitQty,
+                'Convert': formatQty((unitQty * subUnitItem + subUnitQty) / subUnitItem)
+            });
+            document.getElementById('customCode').value = '';
+            document.getElementById('customDesc').value = '';
+            document.getElementById('customUnit').value = '';
+            document.getElementById('customSubUnit').value = '';
+            document.getElementById('customSubUnitItem').value = '';
+            document.getElementById('customQtyUnit').value = '0';
+            document.getElementById('customQtySubUnit').value = '0';
+            markUnexported();
+            updateSummaryUI();
+            saveState();
+            toast("➕ เพิ่มรายการสำเร็จ (สินค้าใหม่ที่ไม่มีในไฟล์ PO)", 'success');
+        }
+
+
+
+        function refreshLocationDetailOptions() {
+            const select = document.getElementById('locationDetailSelect');
+            if (!select) return;
+
+            const locations = new Set();
+            Object.values(countHistory).forEach(hist => {
+                (hist || []).forEach(h => locations.add(h.location || 'ไม่ระบุสถานที่'));
+            });
+
+            const current = select.value;
+            select.innerHTML = '<option value="">-- เลือกสถานที่ --</option>' +
+                Array.from(locations).sort((a,b) => a.localeCompare(b, 'th'))
+                    .map(loc => `<option value="${escapeHtml(loc)}">${escapeHtml(loc)}</option>`).join('');
+
+            if (locations.has(current)) select.value = current;
+        }
+
+        function getLocationDetail(location) {
+            const rows = [];
+
+            poData.forEach((item, idx) => {
+                const hist = (countHistory[idx] || []).filter(h =>
+                    (h.location || 'ไม่ระบุสถานที่') === location
+                );
+                if (!hist.length) return;
+
+                const unit = hist.reduce((s, h) => s + (Number(h.unit) || 0), 0);
+                const sub = hist.reduce((s, h) => s + (Number(h.subUnit) || 0), 0);
+                const subUnitItem = parseFloat(item['Sub unit item']) || 0;
+                const converted = getConvertedQty(unit, sub, subUnitItem);
+
+                rows.push({
+                    code: item.Code || '',
+                    barcode: item.Barcode || item.BARCODE || item.barcode || '',
+                    description: item.Description || item.Code || '',
+                    category: item.Category || '',
+                    unitName: item.Unit || '',
+                    subUnitName: item['Sub unit'] || '',
+                    subUnitItem,
+                    unit,
+                    sub,
+                    converted,
+                    points: hist.length
+                });
+            });
+
+            return rows;
+        }
+
+        function renderLocationDetail() {
+            const select = document.getElementById('locationDetailSelect');
+            const table = document.getElementById('locationDetailTable');
+            const stats = document.getElementById('locationDetailStats');
+            if (!select || !table || !stats) return;
+
+            refreshLocationDetailOptions();
+            const location = select.value;
+
+            if (!location) {
+                stats.classList.add('hidden');
+                table.innerHTML = '<div class="text-stone-500 p-2 bg-stone-50 rounded">เลือกสถานที่เพื่อดูรายการสินค้า</div>';
+                return;
+            }
+
+            const rows = getLocationDetail(location);
+            const totalUnit = rows.reduce((s, r) => s + r.unit, 0);
+            const totalSub = rows.reduce((s, r) => s + r.sub, 0);
+            const totalItems = rows.length;
+
+            stats.classList.remove('hidden');
+            stats.innerHTML = `
+                <div class="bg-emerald-50 border border-emerald-200 rounded p-2 text-center">
+                    <div class="text-stone-500">สินค้า</div>
+                    <div class="font-bold text-emerald-700 text-lg">${formatQty(totalItems)}</div>
+                </div>
+                <div class="bg-blue-50 border border-blue-200 rounded p-2 text-center">
+                    <div class="text-stone-500">Unit รวม</div>
+                    <div class="font-bold text-blue-700 text-lg">${formatQty(totalUnit)}</div>
+                </div>
+                <div class="bg-amber-50 border border-amber-200 rounded p-2 text-center">
+                    <div class="text-stone-500">Sub Unit รวม</div>
+                    <div class="font-bold text-amber-700 text-lg">${formatQty(totalSub)}</div>
+                </div>`;
+
+            if (!rows.length) {
+                table.innerHTML = '<div class="text-stone-500 p-2 bg-stone-50 rounded">สถานที่นี้ยังไม่มีรายการนับ</div>';
+                return;
+            }
+
+            table.innerHTML = `
+                <table class="w-full border-collapse">
+                    <thead>
+                        <tr class="bg-stone-100 text-left">
+                            <th class="border p-2 whitespace-nowrap">Code</th>
+                            <th class="border p-2 min-w-[150px]">สินค้า</th>
+                            <th class="border p-2 whitespace-nowrap">Unit</th>
+                            <th class="border p-2 whitespace-nowrap">Sub Unit</th>
+                            <th class="border p-2 whitespace-nowrap">รวม</th>
+                            <th class="border p-2 whitespace-nowrap">จุดนับ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(r => {
+                            const convertedText = r.converted === null
+                                ? '-'
+                                : `${Number.isInteger(r.converted) ? r.converted : r.converted.toFixed(2)} ${escapeHtml(r.unitName || '')}`;
+                            return `<tr class="bg-white">
+                                <td class="border p-2 font-mono">${escapeHtml(r.code)}</td>
+                                <td class="border p-2">
+                                    <b>${escapeHtml(r.description)}</b>
+                                    ${r.category ? `<div class="text-stone-400">${escapeHtml(r.category)}</div>` : ''}
+                                </td>
+                                <td class="border p-2 text-center font-bold text-emerald-700">${formatQty(r.unit)} ${escapeHtml(r.unitName)}</td>
+                                <td class="border p-2 text-center font-bold text-amber-700">${formatQty(r.sub)} ${escapeHtml(r.subUnitName)}</td>
+                                <td class="border p-2 text-center font-bold text-blue-700">${convertedText}</td>
+                                <td class="border p-2 text-center">${r.points}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>`;
+        }
+
+        function renderLocationSummary() {
+            const div = document.getElementById('locationSummaryList');
+            if (!div) return;
+
+            const totals = {};
+            Object.keys(countHistory).forEach(idx => {
+                const subUnitItem = parseFloat((poData[idx] || {})['Sub unit item']) || 0;
+                (countHistory[idx] || []).forEach(h => {
+                    const loc = h.location || 'ไม่ระบุสถานที่';
+                    if (!totals[loc]) totals[loc] = { unit: 0, sub: 0, items: new Set(), points: 0, conv: 0 };
+                    totals[loc].unit += Number(h.unit) || 0;
+                    totals[loc].sub += Number(h.subUnit) || 0;
+                    totals[loc].items.add(idx);
+                    totals[loc].points += 1;
+                    const conv = getConvertedQty(Number(h.unit) || 0, Number(h.subUnit) || 0, subUnitItem);
+                    if (Number.isFinite(conv)) totals[loc].conv += conv;
+                });
+            });
+
+            if (!Object.keys(totals).length) {
+                div.innerHTML = 'ยังไม่มีข้อมูลการนับแยกตามสถานที่';
+                return;
+            }
+
+            div.innerHTML = Object.entries(totals)
+                .sort((a,b) => a[0].localeCompare(b[0], 'th'))
+                .map(([loc, t]) => `
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-blue-900">📍 ${escapeHtml(loc)}</span>
+                            <span class="text-stone-500">${t.items.size} รายการ • ${t.points} จุดนับ</span>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 mt-2">
+                            <div class="bg-white rounded p-2 text-center">
+                                <div class="text-stone-500">Unit รวม</div>
+                                <div class="font-bold text-emerald-700 text-lg">${formatQty(t.unit)}</div>
+                            </div>
+                            <div class="bg-white rounded p-2 text-center">
+                                <div class="text-stone-500">Sub Unit รวม</div>
+                                <div class="font-bold text-amber-700 text-lg">${formatQty(t.sub)}</div>
+                            </div>
+                            <div class="bg-white rounded p-2 text-center">
+                                <div class="text-stone-500">Converted รวม</div>
+                                <div class="font-bold text-sky-700 text-lg">${formatQty(t.conv)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+        }
+
+        function updateSummaryUI() {
+            const summaryDiv = document.getElementById('summaryList');
+            const poKeys = Object.keys(countedUnitData).concat(Object.keys(countedSubUnitData)).filter((v, i, a) => a.indexOf(v) === i);
+            const total = poKeys.length + customItems.length;
+            document.getElementById('totalCountedItems').textContent = total;
+            const progressBase = poData.length || 0;
+            const progress = progressBase ? Math.min(100, Math.round((poKeys.length / progressBase) * 100)) : 0;
+            const progressEl = document.getElementById('progressText');
+            if (progressEl) progressEl.textContent = `ความคืบหน้า: ${progress}% (${poKeys.length}/${progressBase || 0} รายการ PO)`;
+
+            if (total === 0) {
+                summaryDiv.innerHTML = "ยังไม่มีการบันทึกข้อมูล";
+                return;
+            }
+
+            let html = "";
+            poKeys.forEach(idx => {
+                const item = poData[idx];
+                const fillCount = (countHistory[idx] || []).length;
+                const badge = fillCount > 1 ? ` <span class="text-stone-400">(📍${fillCount} จุด)</span>` : '';
+                html += `<div class="bg-white p-1.5 rounded border mb-1 flex justify-between items-center">
+                    <span><b>${escapeHtml(item.Description || item.Code)}</b>${badge}</span>
+                    <span class="text-emerald-700 font-bold">Unit: ${formatQty(countedUnitData[idx]) || 0} | Sub: ${formatQty(countedSubUnitData[idx]) || 0}</span>
+                </div>`;
+            });
+            customItems.forEach(ci => {
+                html += `<div class="bg-amber-50 p-1.5 rounded border mb-1 flex justify-between items-center">
+                    <span><b>🆕 ${escapeHtml(ci.Description || ci.Code)}</b></span>
+                    <span class="text-amber-700 font-bold">Unit: ${ci['Counted Unit Qty']||0} | Sub: ${ci['Counted Sub Unit OZ/GL Qty']||0}</span>
+                </div>`;
+            });
+            summaryDiv.innerHTML = html;
+            renderLocationSummary();
+            refreshLocationDetailOptions();
+            renderLocationDetail();
+            renderCountHistory();
+        }
+
+        function exportExcel() {
+            if (!poData.length && !customItems.length) {
+                toast('ยังไม่มีข้อมูลสำหรับ Export', 'warn');
+                return;
+            }
+
+            const summary = poData.map((item, idx) => {
+                const unitQty = parseFloat(countedUnitData[idx]) || 0;
+                const subQty = parseFloat(countedSubUnitData[idx]) || 0;
+                const subUnitItem = parseFloat(item['Sub unit item']) || 0;
+                return {
+                    Code: item.Code || '',
+                    Barcode: item.Barcode || item.BARCODE || item.barcode || '',
+                    Description: item.Description || '',
+                    Category: item.Category || '',
+                    Unit: item.Unit || '',
+                    'Sub unit': item['Sub unit'] || '',
+                    'Sub unit item': subUnitItem,
+                    'Counted Unit Qty': unitQty,
+                    'Counted Sub Unit Qty': subQty,
+                    'Converted Qty': getConvertedQty(unitQty, subQty, subUnitItem) ?? '',
+                    'Count Points': (countHistory[idx] || []).length
+                };
+            });
+
+            customItems.forEach(ci => {
+                summary.push({
+                    Code: ci.Code || '',
+                    Barcode: '',
+                    Description: ci.Description || '',
+                    Category: 'CUSTOM',
+                    Unit: ci.Unit || '',
+                    'Sub unit': ci['Sub unit'] || '',
+                    'Sub unit item': ci['Sub unit item'] || '',
+                    'Counted Unit Qty': ci['Counted Unit Qty'] || 0,
+                    'Counted Sub Unit Qty': ci['Counted Sub Unit OZ/GL Qty'] || 0,
+                    'Converted Qty': ci.Convert ?? '',
+                    'Count Points': 1
+                });
+            });
+
+            const history = [];
+            poData.forEach((item, idx) => {
+                (countHistory[idx] || []).forEach(h => {
+                    history.push({
+                        Code: item.Code || '',
+                        Barcode: item.Barcode || item.BARCODE || item.barcode || '',
+                        Description: item.Description || '',
+                        Category: item.Category || '',
+                        Location: h.location || '',
+                        Unit: item.Unit || '',
+                        'Sub unit': item['Sub unit'] || '',
+                        'Unit Qty': h.unit,
+                        'Sub Unit Qty': h.subUnit,
+                        'Converted Qty': getConvertedQty(Number(h.unit) || 0, Number(h.subUnit) || 0, parseFloat(item['Sub unit item']) || 0) ?? '',
+                        'Date/Time': h.time
+                    });
+                });
+            });
+
+            customItems.forEach(ci => {
+                history.push({
+                    Code: ci.Code || '',
+                    Barcode: '',
+                    Description: ci.Description || '',
+                    Category: 'CUSTOM',
+                    Location: '',
+                    Unit: ci.Unit || '',
+                    'Sub unit': ci['Sub unit'] || '',
+                        'Unit Qty': ci['Counted Unit Qty'] || 0,
+                        'Sub Unit Qty': ci['Counted Sub Unit OZ/GL Qty'] || 0,
+                        'Converted Qty': ci.Convert ?? '',
+                        'Date/Time': new Date().toLocaleString('th-TH')
+                });
+            });
+
+            // Location Summary: คอลัมน์เดียวกับ Location Detail แต่รวมรายการที่นับซ้ำ
+            // (สินค้าเดียวกัน + สถานที่เดียวกัน = 1 แถว รวมยอดนับทุกจุด)
+            const locationSummary = {};
+            history.forEach(h => {
+                const loc = h.Location || 'ไม่ระบุสถานที่';
+                const key = loc + '||' + (h.Code || '') + '|' + (h.Description || '');
+                if (!locationSummary[key]) {
+                    locationSummary[key] = {
+                        Location: loc,
+                        Code: h.Code || '',
+                        Barcode: h.Barcode || '',
+                        Description: h.Description || '',
+                        Category: h.Category || '',
+                        Unit: h.Unit || '',
+                        'Sub unit': h['Sub unit'] || '',
+                        'Unit Qty': 0,
+                        'Sub Unit Qty': 0,
+                        'Converted Qty': 0,
+                        'Count Points': 0,
+                        __hasConv: false,
+                        __lastTime: ''
+                    };
+                }
+                const t = locationSummary[key];
+                t['Unit Qty'] += Number(h['Unit Qty']) || 0;
+                t['Sub Unit Qty'] += Number(h['Sub Unit Qty']) || 0;
+                if (Number.isFinite(h['Converted Qty'])) {
+                    t['Converted Qty'] += h['Converted Qty'];
+                    t.__hasConv = true;
+                }
+                t['Count Points'] += 1;
+                if (h['Date/Time']) t.__lastTime = h['Date/Time'];
+            });
+
+            const locationRows = Object.values(locationSummary)
+                .sort((a, b) => a.Location.localeCompare(b.Location, 'th') || a.Description.localeCompare(b.Description, 'th'))
+                .map(t => ({
+                    Location: t.Location,
+                    Code: t.Code,
+                    Barcode: t.Barcode,
+                    Description: t.Description,
+                    Category: t.Category,
+                    Unit: t.Unit,
+                    'Sub unit': t['Sub unit'],
+                    'Unit Qty': t['Unit Qty'],
+                    'Sub Unit Qty': t['Sub Unit Qty'],
+                    'Converted Qty': t.__hasConv ? t['Converted Qty'] : '',
+                    'Count Points': t['Count Points'],
+                    'Date/Time': t.__lastTime
+                }));
+
+            if (locationRows.length) {
+                const grand = {
+                    Location: 'รวมทุกจุด',
+                    Code: '',
+                    Barcode: '',
+                    Description: '',
+                    Category: '',
+                    Unit: '',
+                    'Sub unit': '',
+                    'Unit Qty': 0,
+                    'Sub Unit Qty': 0,
+                    'Converted Qty': 0,
+                    'Count Points': 0,
+                    'Date/Time': ''
+                };
+                locationRows.forEach(r => {
+                    grand['Unit Qty'] += r['Unit Qty'];
+                    grand['Sub Unit Qty'] += r['Sub Unit Qty'];
+                    grand['Converted Qty'] += Number(r['Converted Qty']) || 0;
+                    grand['Count Points'] += r['Count Points'];
+                });
+                locationRows.push(grand);
+            }
+
+            const wb = XLSX.utils.book_new();
+            const wsSummary = XLSX.utils.json_to_sheet(summary);
+            const wsHistory = XLSX.utils.json_to_sheet(history.length ? history : [{Message: 'ยังไม่มีประวัติการนับ'}]);
+            const wsLocation = XLSX.utils.json_to_sheet(
+                locationRows.length
+                    ? locationRows
+                    : [{Message: 'ยังไม่มีข้อมูลการนับแยกตามสถานที่'}]
+            );
+
+            const locationDetail = [];
+            poData.forEach((item, idx) => {
+                const entries = countHistory[idx] || [];
+                if (entries.length === 0) return;
+
+                const subUnitItem = parseFloat(item['Sub unit item']) || 0;
+                const base = {
+                    Code: item.Code || '',
+                    Barcode: item.Barcode || item.BARCODE || item.barcode || '',
+                    Description: item.Description || '',
+                    Category: item.Category || '',
+                    Unit: item.Unit || '',
+                    'Sub unit': item['Sub unit'] || ''
+                };
+
+                // จุดนับเดียว: แสดงแถวเดียวเหมือนเดิม
+                if (entries.length === 1) {
+                    const h = entries[0];
+                    const unit = Number(h.unit) || 0;
+                    const sub = Number(h.subUnit) || 0;
+                    locationDetail.push({
+                        Location: h.location || 'ไม่ระบุสถานที่',
+                        ...base,
+                        'Unit Qty': unit,
+                        'Sub Unit Qty': sub,
+                        'Converted Qty': getConvertedQty(unit, sub, subUnitItem) ?? '',
+                        'Count Points': 1,
+                        'Date/Time': h.time || ''
+                    });
+                    return;
+                }
+
+                // หลายจุดนับ: แสดงแยกทีละจุด แล้วปิดท้ายด้วยแถวรวมของสินค้านี้
+                let sumUnit = 0, sumSub = 0;
+                entries.forEach((h, i) => {
+                    const unit = Number(h.unit) || 0;
+                    const sub = Number(h.subUnit) || 0;
+                    sumUnit += unit;
+                    sumSub += sub;
+                    locationDetail.push({
+                        Location: h.location || 'ไม่ระบุสถานที่',
+                        ...base,
+                        'Unit Qty': unit,
+                        'Sub Unit Qty': sub,
+                        'Converted Qty': getConvertedQty(unit, sub, subUnitItem) ?? '',
+                        'Count Points': `จุดที่ ${i + 1}`,
+                        'Date/Time': h.time || ''
+                    });
+                });
+                locationDetail.push({
+                    Location: 'รวมทุกจุด',
+                    ...base,
+                    'Unit Qty': sumUnit,
+                    'Sub Unit Qty': sumSub,
+                    'Converted Qty': getConvertedQty(sumUnit, sumSub, subUnitItem) ?? '',
+                    'Count Points': entries.length,
+                    'Date/Time': ''
+                });
+            });
+
+            const wsLocationDetail = XLSX.utils.json_to_sheet(
+                locationDetail.length ? locationDetail : [{Message: 'ยังไม่มีรายละเอียดตามสถานที่'}]
+            );
+
+            XLSX.utils.book_append_sheet(wb, wsSummary, 'Inventory Summary');
+            XLSX.utils.book_append_sheet(wb, wsLocation, 'Location Summary');
+            XLSX.utils.book_append_sheet(wb, wsLocationDetail, 'Location Detail');
+            XLSX.utils.book_append_sheet(wb, wsHistory, 'Count History');
+
+            const sessionName = (inventorySession.name || 'Inventory').replace(/[\\/:*?"<>|]/g, '_');
+            XLSX.writeFile(wb, `Navera_${sessionName}_Result.xlsx`);
+
+            // มาร์คว่า Export แล้ว จะได้ไม่เตือนซ้ำตอนล้าง/เริ่มรอบใหม่
+            inventorySession.hasUnexported = false;
+            saveState();
+            updateSessionUI();
+            toast('📥 Export สำเร็จ — ตรวจไฟล์ในโฟลเดอร์ Downloads', 'success');
+        }
+    </script>
+</body>
+</html>
